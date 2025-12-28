@@ -128,16 +128,33 @@ export default function App() {
   <div style={{ fontSize: '9px', color: '#444', marginBottom: '10px' }}>DIVERGENCE OVERLAY: PRICE (CYAN) / RSI-5 (GOLD)</div>
   <svg viewBox="0 0 300 100" style={{ width: '100%', height: '150px', overflow: 'visible' }}>
     {/* Price Path */}
-    <polyline
-      points={history.current.slice(-20).map((p, i) => {
-        const x = (i / 19) * 300;
-        const min = Math.min(...history.current.slice(-20));
-        const max = Math.max(...history.current.slice(-20));
-        const y = 100 - ((p - min) / (max - min || 1)) * 80;
-        return `${x},${y}`;
-      }).join(' ')}
-      fill="none" stroke="#00ffcc" strokeWidth="1" opacity="0.5"
-    />
+    {/* Price Path (Cyan) */}
+<polyline
+  points={history.current.slice(-20).map((p, i) => {
+    const x = (i / 19) * 300;
+    const min = Math.min(...history.current.slice(-20));
+    const max = Math.max(...history.current.slice(-20));
+    const y = 100 - ((p - min) / (max - min || 1)) * 80;
+    return `${x},${y}`;
+  }).join(' ')}
+  fill="none" stroke="#00ffcc" strokeWidth="1" opacity="0.3"
+/>
+
+{/* RSI Tethered Path (Gold) */}
+<polyline
+  points={history.current.slice(-20).map((p, i) => {
+    const x = (i / 19) * 300;
+    const min = Math.min(...history.current.slice(-20));
+    const max = Math.max(...history.current.slice(-20));
+    
+    // THE FIX: Move RSI up/down relative to the PRICE's Y-position
+    const priceY = 100 - ((p - min) / (max - min || 1)) * 80;
+    const rsiAdjustment = (metrics.rsi - 50) * 0.4; // Sensitivity
+    
+    return `${x},${priceY + rsiAdjustment}`;
+  }).join(' ')}
+  fill="none" stroke="#fbbf24" strokeWidth="2"
+/>
     {/* RSI Overlay (Sticky) */}
     <polyline
       points={history.current.slice(-20).map((p, i) => {
