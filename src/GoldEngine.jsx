@@ -1,48 +1,3 @@
-import React, { useState, useEffect, useRef } from 'react';
-
-export default function App() {
-  const [price, setPrice] = useState(4551.68);
-  const [panic, setPanic] = useState(false);
-  const [metrics, setMetrics] = useState({
-    vol: 0.12,
-    z: 0,
-    regime: 'STABLE',
-    rsi: 50,
-  });
-  const lastVar = useRef(0.0144);
-  const history = useRef([4551.68]);
-
-  const tick = (p) => {
-    const prev = history.current[history.current.length - 1] || p;
-    const ret = (p - prev) / prev;
-    const currentVol = Math.sqrt(lastVar.current);
-    const z = ret / (currentVol || 0.001);
-
-    // --- EGARCH V8.0 CORE ---
-    const logV =
-      -0.45 +
-      0.92 * Math.log(lastVar.current) +
-      0.12 * (Math.abs(z) - 0.797) +
-      -0.15 * z;
-    const nVar = Math.exp(logV);
-    lastVar.current = nVar;
-    history.current.push(p);
-
-    const isPanic = nVar > 0.4 && z < -1.2;
-    setPanic(isPanic);
-
-    setMetrics({
-      vol: Math.sqrt(nVar),
-      z: z,
-      regime: isPanic
-        ? 'CRITICAL ALPHA'
-        : nVar > 0.3
-        ? 'VOL EXPANSION'
-        : 'STABLE ACCUM',
-      rsi: 50 + z * 15,
-    });
-  };
-
   useEffect(() => {
     const getPAXG = () => {
       fetch('https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT')
@@ -50,228 +5,94 @@ export default function App() {
         .then((d) => {
           const val = parseFloat(d.price);
           setPrice(val);
-          tick(val);
+          
+          // 1. Update History
+          history.current = [...history.current, val].slice(-50);
+          if (history.current.length < 5) return;
+
+          // 2. MOMENTUM & Z-SHOCK LOGIC (Combined)
+          const avg = history.current.reduce((a, b) => a + b) / history.current.length;
+          const squareDiffs = history.current.map(p => Math.pow(p - avg, 2));
+          const stdDev = Math.sqrt(squareDiffs.reduce((a, b) => a + b) / history.current.length);
+          const newZ = stdDev === 0 ? 0 : (val - avg) / stdDev;
+          
+          const oldPrice = history.current[0];
+          const newMom = 50 + (((val - oldPrice) / oldPrice) * 1000);
+
+          setMetrics({
+            vol: stdDev / avg, // Real-time volatility
+            z: newZ,
+            rsi: newMom,
+            regime: newZ < -1.5 ? 'CRITICAL ALPHA' : newZ > 1.5 ? 'VOL EXPANSION' : 'STABLE ACCUM'
+          });
         })
         .catch((err) => console.log('Feed Syncing...'));
-// Inside your data fetching useEffect
-const updateCalculations = (newPrice) => {
-  // 1. Update History
-  history.current = [...history.current, newPrice].slice(-50); // Keep last 50 points
-
-  if (history.current.length < 10) return; // Wait for "Warm-up"
-
-  // 2. Momentum Fix (Relative to 50)
-  const oldPrice = history.current[0];
-  const change = ((newPrice - oldPrice) / oldPrice) * 1000; 
-  const newMomentum = 50 + change; // Now it will move away from 50
-
-  // 3. Z-Shock Fix
-  const avg = history.current.reduce((a, b) => a + b) / history.current.length;
-  const squareDiffs = history.current.map(p => Math.pow(p - avg, 2));
-  const stdDev = Math.sqrt(squareDiffs.reduce((a, b) => a + b) / history.current.length);
-  
-  const newZScore = stdDev === 0 ? 0 : (newPrice - avg) / stdDev;
-
-  setMetrics(prev => ({
-    ...prev,
-    price: newPrice,
-    momentum: newMomentum.toFixed(2),
-    zShock: newZScore.toFixed(2)
-  }));
-};
-
     };
+
     getPAXG();
     const id = setInterval(getPAXG, 5000);
     return () => clearInterval(id);
   }, []);
 
   return (
-    <div
-      style={{
-        background: '#050505',
-        color: '#e5e5e5',
-        minHeight: '100vh',
-        fontFamily: 'monospace',
-        padding: '20px',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          borderBottom: '1px solid #222',
-          paddingBottom: '10px',
-        }}
-      >
-        <span style={{ fontSize: '10px', letterSpacing: '2px', color: '#666' }}>
-          SENTINEL V8.0 // PAXG.USDT
-        </span>
-        <span
-          style={{ fontSize: '10px', color: panic ? '#ff4444' : '#00ffcc' }}
-        >
-          {panic ? '⚠️ HIGH RISK' : '● LIVE FEED'}
-        </span>
+    <div style={{ background: '#050505', color: '#e5e5e5', minHeight: '100vh', padding: '20px', fontFamily: 'monospace' }}>
+      {/* HEADER */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #222', paddingBottom: '10px' }}>
+        <span style={{ fontSize: '10px', color: '#666' }}>SENTINEL V8.0 // PAXG.USDT</span>
+        <span style={{ fontSize: '10px', color: '#00ffcc' }}>● LIVE FEED</span>
       </div>
 
+      {/* PRICE SECTION */}
       <div style={{ marginTop: '30px' }}>
-        <h1 style={{ fontSize: '42px', margin: '0', fontWeight: '300' }}>
-          ${price.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-        </h1>
-        <div
-          style={{
-            color: panic ? '#ff4444' : '#00ffcc',
-            fontWeight: 'bold',
-            fontSize: '14px',
-            marginTop: '5px',
-          }}
-        >
-          {metrics.regime}
-        </div>
+        <h1 style={{ fontSize: '42px', margin: '0' }}>${price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h1>
+        <div style={{ color: '#00ffcc', fontWeight: 'bold', fontSize: '14px' }}>{metrics.regime}</div>
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr 1fr',
-          gap: '10px',
-          marginTop: '30px',
-        }}
-      >
-        <div
-          style={{
-            background: '#0a0a0a',
-            padding: '15px',
-            border: '1px solid #111',
-          }}
-        >
+      {/* METRICS GRID */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginTop: '30px' }}>
+        <div style={{ background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
           <div style={{ fontSize: '9px', color: '#444' }}>VOL (ANN)</div>
-          <div style={{ fontSize: '16px', color: '#22d3ee' }}>
-            {(metrics.vol * 100).toFixed(2)}%
-          </div>
+          <div style={{ fontSize: '16px', color: '#22d3ee' }}>{(metrics.vol * 100).toFixed(2)}%</div>
         </div>
- {/* --- CUSTOM DIVERGENCE CHART --- */}
-<div style={{ marginTop: '20px', background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
-  <div style={{ fontSize: '9px', color: '#444', marginBottom: '10px' }}>DIVERGENCE OVERLAY: PRICE (CYAN) / RSI-5 (GOLD)</div>
-  <svg viewBox="0 0 300 100" style={{ width: '100%', height: '150px', overflow: 'visible' }}>
-    {/* Price Path */}
-    {/* Price Path (Cyan) */}
-<div style={{ marginTop: '20px', background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
-  <div style={{ fontSize: '9px', color: '#444', marginBottom: '10px' }}>DIVERGENCE OVERLAY</div>
-  <svg viewBox="0 0 300 100" style={{ width: '100%', height: '150px', overflow: 'visible' }}>
-    
-    {/* 1. CYAN PRICE LINE (REPLACED WITH SAFETY MATH) */}
-    <polyline
-      points={history.current.slice(-20).map((p, i) => {
-        const x = (i / 19) * 300;
-        const slice = history.current.slice(-20);
-        const min = Math.min(...slice);
-        const max = Math.max(...slice);
-        const range = max - min || 1; // Prevents division by zero
-        const y = 100 - ((p - min) / range) * 80;
-        return `${x},${y}`;
-      }).join(' ')}
-      fill="none" stroke="#00ffcc" strokeWidth="2" opacity="0.8"
-    />
-
-    {/* 2. GOLD RSI LINE (TETHERED TO PRICE) */}
-    <polyline
-      points={history.current.slice(-20).map((p, i) => {
-        const x = (i / 19) * 300;
-        const slice = history.current.slice(-20);
-        const min = Math.min(...slice);
-        const max = Math.max(...slice);
-        const range = max - min || 1;
-        
-        const priceY = 100 - ((p - min) / range) * 80;
-        const rsiAdjustment = (metrics.rsi - 50) * 0.4; // Moves gold line relative to cyan
-        
-        return `${x},${priceY + rsiAdjustment}`;
-      }).join(' ')}
-      fill="none" stroke="#fbbf24" strokeWidth="2"
-    />
-  </svg>
-</div>
-
-
-
-{/* RSI Tethered Path (Gold) */}
-<polyline
-  points={history.current.slice(-20).map((p, i) => {
-    const x = (i / 19) * 300;
-    const min = Math.min(...history.current.slice(-20));
-    const max = Math.max(...history.current.slice(-20));
-    
-    // THE FIX: Move RSI up/down relative to the PRICE's Y-position
-    const priceY = 100 - ((p - min) / (max - min || 1)) * 80;
-    const rsiAdjustment = (metrics.rsi - 50) * 0.4; // Sensitivity
-    
-    return `${x},${priceY + rsiAdjustment}`;
-  }).join(' ')}
-  fill="none" stroke="#fbbf24" strokeWidth="2"
-/>
-    {/* RSI Overlay (Sticky) */}
-    <polyline
-      points={history.current.slice(-20).map((p, i) => {
-        const x = (i / 19) * 300;
-        // This 'Tethers' the RSI to the price movement
-        const rsiOffset = (metrics.rsi - 50) * 0.5; 
-        const min = Math.min(...history.current.slice(-20));
-        const max = Math.max(...history.current.slice(-20));
-        const y = (100 - ((p - min) / (max - min || 1)) * 80) + rsiOffset;
-        return `${x},${y}`;
-      }).join(' ')}
-      fill="none" stroke="#fbbf24" strokeWidth="1.5"
-    />
-  </svg>
-</div>
-
-        <div
-          style={{
-            background: '#0a0a0a',
-            padding: '15px',
-            border: '1px solid #111',
-          }}
-        >
+        <div style={{ background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
           <div style={{ fontSize: '9px', color: '#444' }}>Z-SHOCK</div>
-          <div
-            style={{
-              fontSize: '16px',
-              color: metrics.z < 0 ? '#ff4444' : '#00ffcc',
-            }}
-          >
-            {metrics.z.toFixed(2)}
-          </div>
+          <div style={{ fontSize: '16px', color: metrics.z < 0 ? '#ff4444' : '#00ffcc' }}>{metrics.z.toFixed(2)}</div>
         </div>
-        <div
-          style={{
-            background: '#0a0a0a',
-            padding: '15px',
-            border: '1px solid #111',
-          }}
-        >
+        <div style={{ background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
           <div style={{ fontSize: '9px', color: '#444' }}>MOMENTUM</div>
-          <div style={{ fontSize: '16px', color: '#fbbf24' }}>
-            {metrics.rsi.toFixed(0)}
-          </div>
+          <div style={{ fontSize: '16px', color: '#fbbf24' }}>{metrics.rsi.toFixed(0)}</div>
         </div>
       </div>
 
-      <div style={{ marginTop: '40px' }}>
-        <div style={{ fontSize: '9px', color: '#444', marginBottom: '8px' }}>
-          RISK EXPOSURE
-        </div>
-        <div style={{ height: '2px', background: '#111', width: '100%' }}>
-          <div
-            style={{
-              height: '100%',
-              width: `${Math.min(metrics.vol * 200, 100)}%`,
-              background: panic ? '#f00' : '#00ffcc',
-              transition: 'width 0.8s ease',
-            }}
+      {/* CLEAN DIVERGENCE CHART */}
+      <div style={{ marginTop: '20px', background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
+        <div style={{ fontSize: '9px', color: '#444', marginBottom: '10px' }}>DIVERGENCE OVERLAY</div>
+        <svg viewBox="0 0 300 100" style={{ width: '100%', height: '150px', overflow: 'visible' }}>
+          <polyline
+            points={history.current.slice(-20).map((p, i) => {
+              const x = (i / 19) * 300;
+              const slice = history.current.slice(-20);
+              const min = Math.min(...slice);
+              const max = Math.max(...slice);
+              const range = max - min || 1;
+              const y = 100 - ((p - min) / range) * 80;
+              return `${x},${y}`;
+            }).join(' ')}
+            fill="none" stroke="#00ffcc" strokeWidth="2"
           />
-        </div>
+          <polyline
+            points={history.current.slice(-20).map((p, i) => {
+              const x = (i / 19) * 300;
+              const slice = history.current.slice(-20);
+              const min = Math.min(...slice);
+              const max = Math.max(...slice);
+              const range = max - min || 1;
+              const priceY = 100 - ((p - min) / range) * 80;
+              return `${x},${priceY + (metrics.rsi - 50) * 0.4}`;
+            }).join(' ')}
+            fill="none" stroke="#fbbf24" strokeWidth="2"
+          />
+        </svg>
       </div>
     </div>
   );
-}
