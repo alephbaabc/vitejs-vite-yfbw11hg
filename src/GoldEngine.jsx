@@ -123,6 +123,37 @@ export default function App() {
             {(metrics.vol * 100).toFixed(2)}%
           </div>
         </div>
+ {/* --- CUSTOM DIVERGENCE CHART --- */}
+<div style={{ marginTop: '20px', background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
+  <div style={{ fontSize: '9px', color: '#444', marginBottom: '10px' }}>DIVERGENCE OVERLAY: PRICE (CYAN) / RSI-5 (GOLD)</div>
+  <svg viewBox="0 0 300 100" style={{ width: '100%', height: '150px', overflow: 'visible' }}>
+    {/* Price Path */}
+    <polyline
+      points={history.current.slice(-20).map((p, i) => {
+        const x = (i / 19) * 300;
+        const min = Math.min(...history.current.slice(-20));
+        const max = Math.max(...history.current.slice(-20));
+        const y = 100 - ((p - min) / (max - min || 1)) * 80;
+        return `${x},${y}`;
+      }).join(' ')}
+      fill="none" stroke="#00ffcc" strokeWidth="1" opacity="0.5"
+    />
+    {/* RSI Overlay (Sticky) */}
+    <polyline
+      points={history.current.slice(-20).map((p, i) => {
+        const x = (i / 19) * 300;
+        // This 'Tethers' the RSI to the price movement
+        const rsiOffset = (metrics.rsi - 50) * 0.5; 
+        const min = Math.min(...history.current.slice(-20));
+        const max = Math.max(...history.current.slice(-20));
+        const y = (100 - ((p - min) / (max - min || 1)) * 80) + rsiOffset;
+        return `${x},${y}`;
+      }).join(' ')}
+      fill="none" stroke="#fbbf24" strokeWidth="1.5"
+    />
+  </svg>
+</div>
+
         <div
           style={{
             background: '#0a0a0a',
