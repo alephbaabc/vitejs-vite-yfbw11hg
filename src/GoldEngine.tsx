@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 
 export default function App() {
-  // --- MISSING STATES ADDED HERE ---
   const [price, setPrice] = useState(0);
   const [metrics, setMetrics] = useState({
     vol: 0,
@@ -19,11 +18,9 @@ export default function App() {
           const val = parseFloat(d.price);
           setPrice(val);
           
-          // 1. Update History
           history.current = [...history.current, val].slice(-50);
           if (history.current.length < 5) return;
 
-          // 2. MOMENTUM & Z-SHOCK LOGIC
           const avg = history.current.reduce((a, b) => a + b) / history.current.length;
           const squareDiffs = history.current.map(p => Math.pow(p - avg, 2));
           const stdDev = Math.sqrt(squareDiffs.reduce((a, b) => a + b) / history.current.length);
@@ -40,8 +37,9 @@ export default function App() {
           });
         })
         .catch((err) => {
-  console.error('Feed Syncing Error:', err); // Now 'err' is used!
-       });
+          console.error('Feed Syncing Error:', err);
+        });
+    }; // <-- THIS BRACE was missing in your snippet
 
     getPAXG();
     const id = setInterval(getPAXG, 5000);
@@ -50,19 +48,16 @@ export default function App() {
 
   return (
     <div style={{ background: '#050505', color: '#e5e5e5', minHeight: '100vh', padding: '20px', fontFamily: 'monospace' }}>
-      {/* HEADER */}
       <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #222', paddingBottom: '10px' }}>
         <span style={{ fontSize: '10px', color: '#666' }}>SENTINEL V8.0 // PAXG.USDT</span>
         <span style={{ fontSize: '10px', color: '#00ffcc' }}>● LIVE FEED</span>
       </div>
 
-      {/* PRICE SECTION */}
       <div style={{ marginTop: '30px' }}>
         <h1 style={{ fontSize: '42px', margin: '0' }}>${price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h1>
         <div style={{ color: '#00ffcc', fontWeight: 'bold', fontSize: '14px' }}>{metrics.regime}</div>
       </div>
 
-      {/* METRICS GRID */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginTop: '30px' }}>
         <div style={{ background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
           <div style={{ fontSize: '9px', color: '#444' }}>VOL (ANN)</div>
@@ -78,7 +73,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* CLEAN DIVERGENCE CHART */}
       <div style={{ marginTop: '20px', background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
         <div style={{ fontSize: '9px', color: '#444', marginBottom: '10px' }}>DIVERGENCE OVERLAY: PRICE (CYAN) / RSI (GOLD)</div>
         <svg viewBox="0 0 300 100" style={{ width: '100%', height: '150px', overflow: 'visible' }}>
