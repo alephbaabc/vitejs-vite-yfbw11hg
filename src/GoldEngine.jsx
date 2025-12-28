@@ -156,22 +156,43 @@ const updateCalculations = (newPrice) => {
   <svg viewBox="0 0 300 100" style={{ width: '100%', height: '150px', overflow: 'visible' }}>
     {/* Price Path */}
     {/* Price Path (Cyan) */}
-<polyline
-  points={history.current.slice(-20).map((p, i) => {
-    const x = (i / 19) * 300;
-    const slice = history.current.slice(-20);
-    const min = Math.min(...slice);
-    const max = Math.max(...slice);
+<div style={{ marginTop: '20px', background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
+  <div style={{ fontSize: '9px', color: '#444', marginBottom: '10px' }}>DIVERGENCE OVERLAY</div>
+  <svg viewBox="0 0 300 100" style={{ width: '100%', height: '150px', overflow: 'visible' }}>
     
-    // THE FIX: ensures the line appears even if price is steady
-    const range = max - min || 1; 
-    const y = 100 - ((p - min) / range) * 80;
-    return `${x},${y}`;
-  }).join(' ')}
-  fill="none" 
-  stroke="#00ffcc" 
-  strokeWidth="2" 
-/>
+    {/* 1. CYAN PRICE LINE (REPLACED WITH SAFETY MATH) */}
+    <polyline
+      points={history.current.slice(-20).map((p, i) => {
+        const x = (i / 19) * 300;
+        const slice = history.current.slice(-20);
+        const min = Math.min(...slice);
+        const max = Math.max(...slice);
+        const range = max - min || 1; // Prevents division by zero
+        const y = 100 - ((p - min) / range) * 80;
+        return `${x},${y}`;
+      }).join(' ')}
+      fill="none" stroke="#00ffcc" strokeWidth="2" opacity="0.8"
+    />
+
+    {/* 2. GOLD RSI LINE (TETHERED TO PRICE) */}
+    <polyline
+      points={history.current.slice(-20).map((p, i) => {
+        const x = (i / 19) * 300;
+        const slice = history.current.slice(-20);
+        const min = Math.min(...slice);
+        const max = Math.max(...slice);
+        const range = max - min || 1;
+        
+        const priceY = 100 - ((p - min) / range) * 80;
+        const rsiAdjustment = (metrics.rsi - 50) * 0.4; // Moves gold line relative to cyan
+        
+        return `${x},${priceY + rsiAdjustment}`;
+      }).join(' ')}
+      fill="none" stroke="#fbbf24" strokeWidth="2"
+    />
+  </svg>
+</div>
+
 
 
 {/* RSI Tethered Path (Gold) */}
