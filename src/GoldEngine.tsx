@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 export default function App() {
   // --- MISSING STATES ADDED HERE ---
@@ -39,8 +39,9 @@ export default function App() {
             regime: newZ < -1.5 ? 'CRITICAL ALPHA' : newZ > 1.5 ? 'VOL EXPANSION' : 'STABLE ACCUM'
           });
         })
-        .catch((err) => console.log('Feed Syncing...'));
-    };
+        .catch((err) => {
+  console.error('Feed Syncing Error:', err); // Now 'err' is used!
+       });
 
     getPAXG();
     const id = setInterval(getPAXG, 5000);
