@@ -1,3 +1,16 @@
+import React, { useState, useEffect, useRef } from 'react';
+
+export default function App() {
+  // --- MISSING STATES ADDED HERE ---
+  const [price, setPrice] = useState(0);
+  const [metrics, setMetrics] = useState({
+    vol: 0,
+    z: 0,
+    rsi: 50,
+    regime: 'STABLE ACCUM',
+  });
+  const history = useRef<number[]>([]);
+
   useEffect(() => {
     const getPAXG = () => {
       fetch('https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT')
@@ -10,7 +23,7 @@
           history.current = [...history.current, val].slice(-50);
           if (history.current.length < 5) return;
 
-          // 2. MOMENTUM & Z-SHOCK LOGIC (Combined)
+          // 2. MOMENTUM & Z-SHOCK LOGIC
           const avg = history.current.reduce((a, b) => a + b) / history.current.length;
           const squareDiffs = history.current.map(p => Math.pow(p - avg, 2));
           const stdDev = Math.sqrt(squareDiffs.reduce((a, b) => a + b) / history.current.length);
@@ -20,7 +33,7 @@
           const newMom = 50 + (((val - oldPrice) / oldPrice) * 1000);
 
           setMetrics({
-            vol: stdDev / avg, // Real-time volatility
+            vol: stdDev / avg, 
             z: newZ,
             rsi: newMom,
             regime: newZ < -1.5 ? 'CRITICAL ALPHA' : newZ > 1.5 ? 'VOL EXPANSION' : 'STABLE ACCUM'
@@ -66,7 +79,7 @@
 
       {/* CLEAN DIVERGENCE CHART */}
       <div style={{ marginTop: '20px', background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
-        <div style={{ fontSize: '9px', color: '#444', marginBottom: '10px' }}>DIVERGENCE OVERLAY</div>
+        <div style={{ fontSize: '9px', color: '#444', marginBottom: '10px' }}>DIVERGENCE OVERLAY: PRICE (CYAN) / RSI (GOLD)</div>
         <svg viewBox="0 0 300 100" style={{ width: '100%', height: '150px', overflow: 'visible' }}>
           <polyline
             points={history.current.slice(-20).map((p, i) => {
@@ -96,3 +109,4 @@
       </div>
     </div>
   );
+}
