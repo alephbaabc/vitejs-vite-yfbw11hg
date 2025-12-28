@@ -53,6 +53,33 @@ export default function App() {
           tick(val);
         })
         .catch((err) => console.log('Feed Syncing...'));
+// Inside your data fetching useEffect
+const updateCalculations = (newPrice) => {
+  // 1. Update History
+  history.current = [...history.current, newPrice].slice(-50); // Keep last 50 points
+
+  if (history.current.length < 10) return; // Wait for "Warm-up"
+
+  // 2. Momentum Fix (Relative to 50)
+  const oldPrice = history.current[0];
+  const change = ((newPrice - oldPrice) / oldPrice) * 1000; 
+  const newMomentum = 50 + change; // Now it will move away from 50
+
+  // 3. Z-Shock Fix
+  const avg = history.current.reduce((a, b) => a + b) / history.current.length;
+  const squareDiffs = history.current.map(p => Math.pow(p - avg, 2));
+  const stdDev = Math.sqrt(squareDiffs.reduce((a, b) => a + b) / history.current.length);
+  
+  const newZScore = stdDev === 0 ? 0 : (newPrice - avg) / stdDev;
+
+  setMetrics(prev => ({
+    ...prev,
+    price: newPrice,
+    momentum: newMomentum.toFixed(2),
+    zShock: newZScore.toFixed(2)
+  }));
+};
+
     };
     getPAXG();
     const id = setInterval(getPAXG, 5000);
@@ -132,13 +159,20 @@ export default function App() {
 <polyline
   points={history.current.slice(-20).map((p, i) => {
     const x = (i / 19) * 300;
-    const min = Math.min(...history.current.slice(-20));
-    const max = Math.max(...history.current.slice(-20));
-    const y = 100 - ((p - min) / (max - min || 1)) * 80;
+    const slice = history.current.slice(-20);
+    const min = Math.min(...slice);
+    const max = Math.max(...slice);
+    
+    // THE FIX: ensures the line appears even if price is steady
+    const range = max - min || 1; 
+    const y = 100 - ((p - min) / range) * 80;
     return `${x},${y}`;
   }).join(' ')}
-  fill="none" stroke="#00ffcc" strokeWidth="1" opacity="0.3"
+  fill="none" 
+  stroke="#00ffcc" 
+  strokeWidth="2" 
 />
+
 
 {/* RSI Tethered Path (Gold) */}
 <polyline
