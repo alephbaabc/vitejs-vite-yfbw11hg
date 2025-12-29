@@ -2,152 +2,123 @@ import { useState, useEffect, useRef } from 'react';
 
 export default function App() {
   const [price, setPrice] = useState(0);
-  const [metrics, setMetrics] = useState<any>({ vol: 0, z: 0, rsi: 50, sigma: 0, premium: 0, buyTicks: 0, sellTicks: 0, regime: 'INITIALIZING' });
+  const [metrics, setMetrics] = useState<any>({ 
+    vol: 0, z: 0, rsi: 50, flux: 50, buyTicks: 0, sellTicks: 0, regime: 'STABLE' 
+  });
   const [minuteHistory, setMinuteHistory] = useState<number[]>([]);
-  const [rsiHistory, setRsiHistory] = useState<number[]>([]);
+  const [waveHistory, setWaveHistory] = useState<number[]>([]);
   
-  const tickBuffer = useRef<number[]>([]);
-  const lastVar = useRef(0.0001); // THE EGARCH MEMORY
   const history = useRef<number[]>([]);
-  const tradeCounters = useRef({ buy: 0, sell: 0 });
+  const tickBuffer = useRef<number[]>([]);
+  const tickCounters = useRef({ up: 0, down: 0 });
 
   useEffect(() => {
-    const announce = (text: string) => {
-      if (window.speechSynthesis.speaking) return;
-      const msg = new SpeechSynthesisUtterance(text);
-      msg.rate = 0.9;
-      window.speechSynthesis.speak(msg);
-    };
-
-    const runEngine = async () => {
+    const runSentinel = async () => {
       try {
-        const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT');
-        const data = await res.json();
-        const val = parseFloat(data.price);
+        const r = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT');
+        const d = await r.json();
+        const val = parseFloat(d.price);
         if (!val) return;
 
         setPrice(val);
         const prev = history.current[history.current.length - 1] || val;
-        const ret = (val - prev) / (prev || 1);
         history.current = [...history.current, val].slice(-100);
 
-        // 1. STEALTH TICK COUNTERS
-        if (val > prev) tradeCounters.current.buy += 1;
-        if (val < prev) tradeCounters.current.sell += 1;
+        // 1. STEALTH TICK COUNTER (The "Missing" Piece)
+        if (val > prev) tickCounters.current.up += 1;
+        if (val < prev) tickCounters.current.down += 1;
 
-        // 2. RESTORED EGARCH + GARCH-M MATH
-        const currentVol = Math.sqrt(lastVar.current);
-        const z = ret / (currentVol || 0.0001);
+        // 2. AGGRESSIVE WAVE + FLUX MATH
+        const mom = ((val - history.current[0]) / (history.current[0] || 1)) * 15000;
+        const currentRSI = 50 + mom;
         
-        // Asymmetric Volatility Forecast
-        const logV = -0.45 + (0.92 * Math.log(lastVar.current)) + (0.12 * (Math.abs(z) - 0.797)) + (-0.15 * z);
-        const nVar = Math.exp(logV);
-        lastVar.current = nVar;
+        // RSI Flux: A 3-period weighted smoothing of momentum
+        const flux = (currentRSI * 0.6) + ((metrics.flux || 50) * 0.4);
 
-        // GARCH-M Risk Premium
-        const riskPremium = 0.5 * nVar;
-
-        // 3. SIGMA & PREMIUM
-        const avg = history.current.reduce((a, b) => a + b, 0) / (history.current.length || 1);
-        const sigma = (val - avg) / (avg * currentVol || 0.0001);
-        const premium = ((val - avg) / (avg || 1)) * 100;
-
-        // 4. 1-MINUTE AGGREGATION
+        // 3. 1-MINUTE AGGREGATION
         tickBuffer.current.push(val);
         if (tickBuffer.current.length >= 12) {
-          setMinuteHistory(h => [...h, val].slice(-40));
-          setRsiHistory(r => [...r, 50 + (ret * 20000)].slice(-40));
+          setMinuteHistory(h => [...h, val].slice(-30));
+          setWaveHistory(w => [...w, flux].slice(-30));
           tickBuffer.current = [];
-          tradeCounters.current = { buy: 0, sell: 0 };
-        }
-
-        const isPanic = nVar > 0.005 && z < -1.5;
-        if (isPanic && metrics.regime !== 'PANIC') {
-          announce("Sentinel Warning. Critical Alpha Panic.");
+          // Reset Stealth Counters every minute for fresh bias reading
+          tickCounters.current = { up: 0, down: 0 };
         }
 
         setMetrics({
-          vol: Math.sqrt(nVar),
-          z: z + riskPremium,
-          rsi: 50 + (ret * 20000),
-          sigma, premium,
-          buyTicks: tradeCounters.current.buy,
-          sellTicks: tradeCounters.current.sell,
-          regime: isPanic ? 'PANIC' : nVar > 0.003 ? 'VOL EXPANSION' : 'STABLE'
+          vol: (val - prev) / (prev || 1),
+          z: (val - (history.current.reduce((a, b) => a + b, 0) / history.current.length)) / 1,
+          rsi: currentRSI,
+          flux: flux,
+          buyTicks: tickCounters.current.up,
+          sellTicks: tickCounters.current.down,
+          regime: currentRSI > 75 ? 'VOL EXPANSION' : currentRSI < 25 ? 'CRITICAL ALPHA' : 'STABLE'
         });
-      } catch (err) { console.log("Engine Sync Error"); }
+      } catch (e) { console.log("Feed Sync..."); }
     };
 
-    const id = setInterval(runEngine, 5000);
-    runEngine();
+    const id = setInterval(runSentinel, 5000);
+    runSentinel();
     return () => clearInterval(id);
-  }, [metrics.regime]);
+  }, [metrics.flux]);
 
   const total = metrics.buyTicks + metrics.sellTicks || 1;
-  const buyPct = (metrics.buyTicks / total) * 100;
+  const buyRatio = (metrics.buyTicks / total) * 100;
 
   return (
     <div style={{ background: '#050505', color: '#e5e5e5', minHeight: '100vh', padding: '20px', fontFamily: 'monospace' }}>
-      {/* HEADER */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #222', paddingBottom: '10px', marginBottom: '20px' }}>
-        <span style={{ fontSize: '10px', color: '#666' }}>SENTINEL V8.0 // EGARCH + GARCH-M</span>
-        <span style={{ fontSize: '10px', color: '#00ffcc' }}>● ACTIVE</span>
+      <div style={{ borderBottom: '1px solid #222', paddingBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: '10px', color: '#666' }}>SENTINEL V8.1 // FLUX-PULSE</span>
+        <span style={{ fontSize: '10px', color: '#00ffcc' }}>● LIVE</span>
       </div>
 
-      {/* PRICE & GARCH-M PREMIUM */}
-      <div style={{ borderLeft: '3px solid #00ffcc', paddingLeft: '15px' }}>
+      {/* PRICE BLOCK */}
+      <div style={{ marginTop: '30px', borderLeft: '3px solid #fbbf24', paddingLeft: '15px' }}>
         <h1 style={{ fontSize: '42px', margin: '0' }}>${price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h1>
-        <div style={{ fontSize: '11px', color: '#fbbf24' }}>
-          GARCH-M RISK PREMIUM: +{(metrics.z * 0.01).toFixed(6)}%
-        </div>
+        <div style={{ color: metrics.rsi > 50 ? '#00ffcc' : '#ff4444', fontWeight: 'bold' }}>{metrics.regime}</div>
       </div>
 
-      {/* STEALTH TICK BAR */}
+      {/* STEALTH TICK COUNTER (UP/DOWN) */}
       <div style={{ marginTop: '25px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', marginBottom: '5px' }}>
-          <span style={{ color: '#00ffcc' }}>STEALTH BUY [{metrics.buyTicks}]</span>
-          <span style={{ color: '#ff4444' }}>[{metrics.sellTicks}] STEALTH SELL</span>
+          <span style={{ color: '#00ffcc' }}>UP-TICKS: {metrics.buyTicks}</span>
+          <span style={{ color: '#ff4444' }}>DOWN-TICKS: {metrics.sellTicks}</span>
         </div>
-        <div style={{ height: '8px', background: '#111', width: '100%', display: 'flex', borderRadius: '2px', overflow: 'hidden' }}>
-          <div style={{ width: `${buyPct}%`, background: '#00ffcc', transition: 'width 0.4s ease' }} />
+        <div style={{ height: '6px', background: '#111', width: '100%', display: 'flex', borderRadius: '10px', overflow: 'hidden' }}>
+          <div style={{ width: `${buyRatio}%`, background: '#00ffcc', transition: 'width 0.4s ease' }} />
           <div style={{ flex: 1, background: '#ff4444' }} />
         </div>
       </div>
 
-      {/* 1m HYBRID CHART */}
+      {/* FLUX & WAVE CHART */}
       <div style={{ marginTop: '20px', background: '#080808', border: '1px solid #151515', padding: '15px' }}>
-        <svg viewBox="0 0 300 100" style={{ width: '100%', height: '160px', overflow: 'visible' }}>
+        <div style={{ fontSize: '8px', color: '#444', marginBottom: '10px' }}>AGGRESSIVE WAVES (GOLD) / PRICE (WHITE)</div>
+        <svg viewBox="0 0 300 100" style={{ width: '100%', height: '140px', overflow: 'visible' }}>
           {minuteHistory.length > 1 && (
             <polyline 
               points={minuteHistory.map((p, i) => `${(i / (minuteHistory.length - 1)) * 300},${100 - ((p - Math.min(...minuteHistory)) / (Math.max(...minuteHistory) - Math.min(...minuteHistory) || 1)) * 80}`).join(' ')} 
               fill="none" stroke="#fff" strokeWidth="1.5" 
             />
           )}
-          {rsiHistory.length > 1 && (
+          {waveHistory.length > 1 && (
             <polyline 
-              points={rsiHistory.map((r, i) => `${(i / (rsiHistory.length - 1)) * 300},${50 - (r - 50)}`).join(' ')} 
-              fill="none" stroke="#fbbf24" strokeWidth="1" opacity="0.4" 
+              points={waveHistory.map((r, i) => `${(i / (waveHistory.length - 1)) * 300},${50 - (r - 50)}`).join(' ')} 
+              fill="none" stroke="#fbbf24" strokeWidth="1" opacity="0.6" 
             />
           )}
         </svg>
       </div>
 
-      {/* CORE METRICS GRID */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '20px' }}>
-        <Stat label="SIGMA (DISTANCE)" val={`${metrics.sigma.toFixed(4)}σ`} color="#22d3ee" />
-        <Stat label="MARKET PREMIUM" val={`${metrics.premium.toFixed(4)}%`} color={metrics.premium > 0 ? '#00ffcc' : '#ff4444'} />
-        <Stat label="EGARCH VOL" val={`${(metrics.vol * 100).toFixed(4)}%`} color="#fbbf24" />
-        <Stat label="REGIME" val={metrics.regime} color={metrics.regime === 'PANIC' ? '#ff4444' : '#00ffcc'} />
+        <div style={{ background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
+          <div style={{ fontSize: '8px', color: '#444' }}>RSI FLUX</div>
+          <div style={{ fontSize: '18px', color: '#fbbf24' }}>{metrics.flux.toFixed(2)}</div>
+        </div>
+        <div style={{ background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
+          <div style={{ fontSize: '8px', color: '#444' }}>MOMENTUM POCKET</div>
+          <div style={{ fontSize: '18px', color: '#22d3ee' }}>{metrics.rsi.toFixed(0)}</div>
+        </div>
       </div>
-    </div>
-  );
-}
-
-function Stat({ label, val, color }: any) {
-  return (
-    <div style={{ background: '#0a0a0a', padding: '12px', border: '1px solid #111' }}>
-      <div style={{ fontSize: '8px', color: '#444' }}>{label}</div>
-      <div style={{ fontSize: '14px', color: color }}>{val}</div>
     </div>
   );
 }
