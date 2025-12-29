@@ -3,6 +3,17 @@ import {
   Waves, X, Database, ArrowUp, ArrowDown, Sun, Moon, 
   Mail, History, ChevronRight, CheckCircle2, GripVertical, Activity, Zap, Bell 
 } from 'lucide-react';
+function App() {
+  return (
+    <div className="min-h-screen bg-gray-100 p-4">
+      <h1 className="text-3xl font-bold text-blue-600">Hello World</h1>
+      <p className="text-gray-700">Your app content here</p>
+    </div>
+  )
+}
+
+export default App
+
 
 const App = () => {
   // --- NATIVE V6.6 CONSTANTS ---
