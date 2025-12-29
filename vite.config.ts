@@ -1,15 +1,16 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from 'tailwindcss'
 
-// https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [
-    react(),
-    // Explicitly disable any PWA plugin if auto-detected
-  ],
-  build: {
-    // Optional: help with build stability
-    outDir: 'dist',
-    sourcemap: false,
+  plugins: [react()],
+  css: {
+    postcss: {
+      plugins: [tailwindcss()]
+    }
   },
-});
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true
+  }
+})
