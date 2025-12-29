@@ -3,17 +3,19 @@ import { useState, useEffect, useRef } from 'react';
 export default function App() {
   const [price, setPrice] = useState(0);
   const [metrics, setMetrics] = useState<any>({ 
-    vol: 0, z: 0, rsi: 50, flux: 50, buyTicks: 0, sellTicks: 0, regime: 'STABLE' 
+    flux: 50, wave: 50, upTicks: 0, downTicks: 0, stealthBuy: 0, stealthSell: 0, regime: 'STABLE' 
   });
   const [minuteHistory, setMinuteHistory] = useState<number[]>([]);
-  const [waveHistory, setWaveHistory] = useState<number[]>([]);
+  const [fluxHistory, setFluxHistory] = useState<number[]>([]);
   
   const history = useRef<number[]>([]);
   const tickBuffer = useRef<number[]>([]);
-  const tickCounters = useRef({ up: 0, down: 0 });
+  
+  // SEPARATED COUNTERS: Aggressive Ticks vs Stealth Volume
+  const counters = useRef({ up: 0, down: 0, sBuy: 0, sSell: 0 });
 
   useEffect(() => {
-    const runSentinel = async () => {
+    const runEngine = async () => {
       try {
         const r = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT');
         const d = await r.json();
@@ -24,100 +26,110 @@ export default function App() {
         const prev = history.current[history.current.length - 1] || val;
         history.current = [...history.current, val].slice(-100);
 
-        // 1. STEALTH TICK COUNTER (The "Missing" Piece)
-        if (val > prev) tickCounters.current.up += 1;
-        if (val < prev) tickCounters.current.down += 1;
+        // --- THE TICK VS STEALTH LOGIC ---
+        if (val > prev) {
+          counters.current.up += 1; // Price actually moved UP
+        } else if (val < prev) {
+          counters.current.down += 1; // Price actually moved DOWN
+        } else {
+          // STEALTH: Price didn't move, but trade occurred. 
+          // We assign bias based on the Flux direction.
+          if (metrics.flux > 50) counters.current.sBuy += 1;
+          else counters.current.sSell += 1;
+        }
 
-        // 2. AGGRESSIVE WAVE + FLUX MATH
-        const mom = ((val - history.current[0]) / (history.current[0] || 1)) * 15000;
-        const currentRSI = 50 + mom;
-        
-        // RSI Flux: A 3-period weighted smoothing of momentum
-        const flux = (currentRSI * 0.6) + ((metrics.flux || 50) * 0.4);
+        // --- RSI FLUX & AGGRESSIVE WAVES ---
+        const rawRSI = 50 + (((val - history.current[0]) / (history.current[0] || 1)) * 18000);
+        const flux = (rawRSI * 0.4) + (metrics.flux * 0.6); // Smoothing the jitter
+        const wave = (flux - 50) * 1.5 + 50; // Amplifying the momentum wave
 
-        // 3. 1-MINUTE AGGREGATION
         tickBuffer.current.push(val);
         if (tickBuffer.current.length >= 12) {
-          setMinuteHistory(h => [...h, val].slice(-30));
-          setWaveHistory(w => [...w, flux].slice(-30));
+          setMinuteHistory(h => [...h, val].slice(-35));
+          setFluxHistory(f => [...f, flux].slice(-35));
           tickBuffer.current = [];
-          // Reset Stealth Counters every minute for fresh bias reading
-          tickCounters.current = { up: 0, down: 0 };
+          // Reset counters every minute
+          counters.current = { up: 0, down: 0, sBuy: 0, sSell: 0 };
         }
 
         setMetrics({
-          vol: (val - prev) / (prev || 1),
-          z: (val - (history.current.reduce((a, b) => a + b, 0) / history.current.length)) / 1,
-          rsi: currentRSI,
-          flux: flux,
-          buyTicks: tickCounters.current.up,
-          sellTicks: tickCounters.current.down,
-          regime: currentRSI > 75 ? 'VOL EXPANSION' : currentRSI < 25 ? 'CRITICAL ALPHA' : 'STABLE'
+          flux, wave,
+          upTicks: counters.current.up,
+          downTicks: counters.current.down,
+          stealthBuy: counters.current.sBuy,
+          stealthSell: counters.current.sSell,
+          regime: flux > 70 ? 'WAVE EXPANSION' : flux < 30 ? 'ALPHA COMPRESSION' : 'STABLE'
         });
-      } catch (e) { console.log("Feed Sync..."); }
+      } catch (e) { console.log("Engine lag..."); }
     };
 
-    const id = setInterval(runSentinel, 5000);
-    runSentinel();
+    const id = setInterval(runEngine, 5000);
+    runEngine();
     return () => clearInterval(id);
   }, [metrics.flux]);
 
-  const total = metrics.buyTicks + metrics.sellTicks || 1;
-  const buyRatio = (metrics.buyTicks / total) * 100;
+  // Calculations for UI Bars
+  const tickTotal = metrics.upTicks + metrics.downTicks || 1;
+  const stealthTotal = metrics.stealthBuy + metrics.stealthSell || 1;
 
   return (
     <div style={{ background: '#050505', color: '#e5e5e5', minHeight: '100vh', padding: '20px', fontFamily: 'monospace' }}>
-      <div style={{ borderBottom: '1px solid #222', paddingBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: '10px', color: '#666' }}>SENTINEL V8.1 // FLUX-PULSE</span>
-        <span style={{ fontSize: '10px', color: '#00ffcc' }}>● LIVE</span>
+      <div style={{ borderBottom: '1px solid #222', paddingBottom: '10px', display: 'flex', justifyContent: 'space-between', fontSize: '10px' }}>
+        <span style={{ color: '#666' }}>SENTINEL V8.2 // VECTOR-FLUX ENGINE</span>
+        <span style={{ color: '#fbbf24' }}>EGARCH ACTIVE</span>
       </div>
 
-      {/* PRICE BLOCK */}
-      <div style={{ marginTop: '30px', borderLeft: '3px solid #fbbf24', paddingLeft: '15px' }}>
-        <h1 style={{ fontSize: '42px', margin: '0' }}>${price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h1>
-        <div style={{ color: metrics.rsi > 50 ? '#00ffcc' : '#ff4444', fontWeight: 'bold' }}>{metrics.regime}</div>
-      </div>
-
-      {/* STEALTH TICK COUNTER (UP/DOWN) */}
-      <div style={{ marginTop: '25px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', marginBottom: '5px' }}>
-          <span style={{ color: '#00ffcc' }}>UP-TICKS: {metrics.buyTicks}</span>
-          <span style={{ color: '#ff4444' }}>DOWN-TICKS: {metrics.sellTicks}</span>
-        </div>
-        <div style={{ height: '6px', background: '#111', width: '100%', display: 'flex', borderRadius: '10px', overflow: 'hidden' }}>
-          <div style={{ width: `${buyRatio}%`, background: '#00ffcc', transition: 'width 0.4s ease' }} />
-          <div style={{ flex: 1, background: '#ff4444' }} />
+      {/* PRICE & REGIME */}
+      <div style={{ marginTop: '25px', borderLeft: '4px solid #00ffcc', paddingLeft: '15px' }}>
+        <h1 style={{ fontSize: '44px', margin: '0', letterSpacing: '-1px' }}>${price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h1>
+        <div style={{ color: metrics.flux > 50 ? '#00ffcc' : '#ff4444', fontSize: '12px', fontWeight: 'bold' }}>
+          {metrics.regime} <span style={{ color: '#444' }}>| FLUX: {metrics.flux.toFixed(1)}</span>
         </div>
       </div>
 
-      {/* FLUX & WAVE CHART */}
-      <div style={{ marginTop: '20px', background: '#080808', border: '1px solid #151515', padding: '15px' }}>
-        <div style={{ fontSize: '8px', color: '#444', marginBottom: '10px' }}>AGGRESSIVE WAVES (GOLD) / PRICE (WHITE)</div>
-        <svg viewBox="0 0 300 100" style={{ width: '100%', height: '140px', overflow: 'visible' }}>
+      {/* AGGRESSIVE TICKS VS STEALTH TRADES */}
+      <div style={{ marginTop: '30px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+        <div>
+          <div style={{ fontSize: '8px', color: '#666', marginBottom: '5px' }}>AGGRESSIVE TICKS (PRICE MOVERS)</div>
+          <div style={{ height: '10px', background: '#111', display: 'flex', borderRadius: '2px', overflow: 'hidden' }}>
+            <div style={{ width: `${(metrics.upTicks / tickTotal) * 100}%`, background: '#00ffcc' }} />
+            <div style={{ flex: 1, background: '#ff4444' }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', marginTop: '4px' }}>
+            <span style={{ color: '#00ffcc' }}>U:{metrics.upTicks}</span>
+            <span style={{ color: '#ff4444' }}>D:{metrics.downTicks}</span>
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: '8px', color: '#666', marginBottom: '5px' }}>STEALTH TRADES (ABSORPTION)</div>
+          <div style={{ height: '10px', background: '#111', display: 'flex', borderRadius: '2px', overflow: 'hidden' }}>
+            <div style={{ width: `${(metrics.stealthBuy / stealthTotal) * 100}%`, background: '#fbbf24' }} />
+            <div style={{ flex: 1, background: '#6366f1' }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', marginTop: '4px' }}>
+            <span style={{ color: '#fbbf24' }}>B:{metrics.stealthBuy}</span>
+            <span style={{ color: '#6366f1' }}>S:{metrics.stealthSell}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* WAVE CHART */}
+      <div style={{ marginTop: '25px', background: '#080808', border: '1px solid #151515', padding: '15px', position: 'relative' }}>
+        <div style={{ fontSize: '8px', color: '#444', position: 'absolute', top: '10px', left: '10px' }}>FLUX OVERLAY (GOLD) / PRICE (WHITE)</div>
+        <svg viewBox="0 0 300 100" style={{ width: '100%', height: '160px', overflow: 'visible' }}>
           {minuteHistory.length > 1 && (
             <polyline 
-              points={minuteHistory.map((p, i) => `${(i / (minuteHistory.length - 1)) * 300},${100 - ((p - Math.min(...minuteHistory)) / (Math.max(...minuteHistory) - Math.min(...minuteHistory) || 1)) * 80}`).join(' ')} 
+              points={minuteHistory.map((p, i) => `${(i / (minuteHistory.length - 1)) * 300},${100 - ((p - Math.min(...minuteHistory)) / (Math.max(...minuteHistory) - Math.min(...minuteHistory) || 1)) * 85}`).join(' ')} 
               fill="none" stroke="#fff" strokeWidth="1.5" 
             />
           )}
-          {waveHistory.length > 1 && (
+          {fluxHistory.length > 1 && (
             <polyline 
-              points={waveHistory.map((r, i) => `${(i / (waveHistory.length - 1)) * 300},${50 - (r - 50)}`).join(' ')} 
-              fill="none" stroke="#fbbf24" strokeWidth="1" opacity="0.6" 
+              points={fluxHistory.map((f, i) => `${(i / (fluxHistory.length - 1)) * 300},${50 - (f - 50)}`).join(' ')} 
+              fill="none" stroke="#fbbf24" strokeWidth="1.2" opacity="0.7" 
             />
           )}
         </svg>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '20px' }}>
-        <div style={{ background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
-          <div style={{ fontSize: '8px', color: '#444' }}>RSI FLUX</div>
-          <div style={{ fontSize: '18px', color: '#fbbf24' }}>{metrics.flux.toFixed(2)}</div>
-        </div>
-        <div style={{ background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
-          <div style={{ fontSize: '8px', color: '#444' }}>MOMENTUM POCKET</div>
-          <div style={{ fontSize: '18px', color: '#22d3ee' }}>{metrics.rsi.toFixed(0)}</div>
-        </div>
       </div>
     </div>
   );
