@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 
-// Explicit type interface to satisfy strict production compilers
 interface Metrics {
   vol: number;
   z: number;
@@ -26,40 +25,120 @@ export default function App() {
   const tradeCounters = useRef({ buy: 0, sell: 0 });
 
   useEffect(() => {
-    const getPAXG = () => {
-      fetch('https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT')
-        .then((r) => r.json())
-        .then((d) => {
-          const val = parseFloat(d.price);
-          setPrice(val);
-          
-          const prev = history.current[history.current.length - 1] || val;
-          const ret = (val - prev) / (prev || 1); // Avoid division by zero
-          history.current = [...history.current, val].slice(-100);
+    const getPAXG = async () => {
+      try {
+        const r = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT');
+        const d = await r.json();
+        const val = parseFloat(d.price);
+        if (isNaN(val)) return;
 
-          // 1. STEALTH TRADES (Tick Direction Counter)
-          if (val > prev) tradeCounters.current.buy += 1;
-          if (val < prev) tradeCounters.current.sell += 1;
+        setPrice(val);
+        const prev = history.current[history.current.length - 1] || val;
+        const ret = (val - prev) / (prev || 1);
+        history.current = [...history.current, val].slice(-100);
 
-          // 2. EGARCH + GARCH-M ENGINE
-          const currentVol = Math.sqrt(lastVar.current);
-          const z = ret / (currentVol || 0.0001);
-          const riskPremium = 0.5 * lastVar.current; // GARCH-M Mean adjustment
-          
-          const logV = -0.45 + (0.92 * Math.log(lastVar.current)) + (0.12 * (Math.abs(z) - 0.797)) + (-0.15 * z);
-          const nVar = Math.exp(logV);
-          lastVar.current = nVar;
+        if (val > prev) tradeCounters.current.buy += 1;
+        if (val < prev) tradeCounters.current.sell += 1;
 
-          // 3. SIGMA & MARKET PREMIUM V7.5
-          const avg = history.current.reduce((a, b) => a + b, 0) / (history.current.length || 1);
-          const sigma = (val - avg) / (avg * currentVol || 0.0001);
-          const premium = ((val - avg) / (avg || 1)) * 100;
+        const currentVol = Math.sqrt(lastVar.current);
+        const z = ret / (currentVol || 0.0001);
+        const riskPremium = 0.5 * lastVar.current; 
+        
+        const logV = -0.45 + (0.92 * Math.log(lastVar.current)) + (0.12 * (Math.abs(z) - 0.797)) + (-0.15 * z);
+        const nVar = Math.exp(logV);
+        lastVar.current = nVar;
 
-          // 4. 1-MINUTE AGGREGATION (12 ticks * 5s)
-          tickBuffer.current.push(val);
-          if (tickBuffer.current.length >= 12) {
-            setMinuteHistory(prevH => [...prevH, val].slice(-30));
-            setRsiHistory(prevR => [...prevR, 50 + (ret * 15000)].slice(-30));
+        const avg = history.current.reduce((a, b) => a + b, 0) / (history.current.length || 1);
+        const sigma = (val - avg) / (avg * currentVol || 0.0001);
+        const premium = ((val - avg) / (avg || 1)) * 100;
+
+        tickBuffer.current.push(val);
+        if (tickBuffer.current.length >= 12) {
+          setMinuteHistory(prevH => [...prevH, val].slice(-30));
+          setRsiHistory(prevR => [...prevR, 50 + (ret * 15000)].slice(-30));
+          tickBuffer.current = [];
+          tradeCounters.current = { buy: 0, sell: 0 }; 
+        }
+
+        setMetrics({
+          vol: Math.sqrt(nVar),
+          z: z + riskPremium,
+          rsi: 50 + (ret * 15000),
+          sigma,
+          premium,
+          buyTicks: tradeCounters.current.buy,
+          sellTicks: tradeCounters.current.sell
+        });
+      } catch (e) {
+        console.error("Build-Safe Error Catch:", e);
+      }
+    };
+
+    const id = setInterval(getPAXG, 5000);
+    getPAXG();
+    return () => clearInterval(id);
+  }, []);
+
+  const totalTicks = metrics.buyTicks + metrics.sellTicks || 1;
+  const buyPct = (metrics.buyTicks / totalTicks) * 100;
+
+  return (
+    <div style={{ background: '#050505', color: '#e5e5e5', minHeight: '100vh', padding: '20px', fontFamily: 'monospace' }}>
+      <div style={{ borderLeft: '3px solid #00ffcc', paddingLeft: '15px' }}>
+        <h1 style={{ fontSize: '38px', margin: '0' }}>${price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h1>
+        <div style={{ fontSize: '10px', color: '#666', marginTop: '5px' }}>
+          GARCH-M MEAN: <span style={{ color: '#fbbf24' }}>+{(metrics.z * 0.01).toFixed(6)}%</span>
+        </div>
+      </div>
+
+      <div style={{ marginTop: '25px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', marginBottom: '5px' }}>
+          <span>STEALTH BUY [{metrics.buyTicks}]</span>
+          <span>[{metrics.sellTicks}] STEALTH SELL</span>
+        </div>
+        <div style={{ height: '8px', background: '#111', width: '100%', display: 'flex', borderRadius: '2px', overflow: 'hidden' }}>
+          <div style={{ width: `${buyPct}%`, background: '#00ffcc' }} />
+          <div style={{ flex: 1, background: '#ff4444' }} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: '20px', background: '#080808', border: '1px solid #151515', padding: '15px' }}>
+         <svg viewBox="0 0 300 100" style={{ width: '100%', height: '140px', overflow: 'visible' }}>
+            {minuteHistory.length > 1 && (
+              <polyline 
+                points={minuteHistory.map((p, i) => {
+                  const min = Math.min(...minuteHistory);
+                  const max = Math.max(...minuteHistory);
+                  const range = max - min || 1;
+                  return `${(i / (minuteHistory.length - 1)) * 300},${100 - ((p - min) / range) * 80}`;
+                }).join(' ')} 
+                fill="none" stroke="#ffffff" strokeWidth="1.5" 
+              />
+            )}
+            {rsiHistory.length > 1 && (
+              <polyline 
+                points={rsiHistory.map((r, i) => `${(i / (rsiHistory.length - 1)) * 300},${50 - (r - 50)}`).join(' ')} 
+                fill="none" stroke="#fbbf24" strokeWidth="1" opacity="0.4" 
+              />
+            )}
+         </svg>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '20px' }}>
+        <div style={{ background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
+          <div style={{ fontSize: '8px', color: '#444' }}>SIGMA V7.5</div>
+          <div style={{ fontSize: '18px', color: '#22d3ee' }}>{metrics.sigma.toFixed(4)}σ</div>
+        </div>
+        <div style={{ background: '#0a0a0a', padding: '15px', border: '1px solid #111' }}>
+          <div style={{ fontSize: '8px', color: '#444' }}>MARKET PREMIUM</div>
+          <div style={{ fontSize: '18px', color: metrics.premium > 0 ? '#00ffcc' : '#ff4444' }}>
+            {metrics.premium.toFixed(4)}%
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
             tickBuffer.current = [];
             tradeCounters.current = { buy: 0, sell: 0 }; 
           }
