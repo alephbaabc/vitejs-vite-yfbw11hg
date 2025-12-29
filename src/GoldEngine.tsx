@@ -46,6 +46,20 @@ export default function App() {
             rsi: mom,
             regime: isPanic ? 'CRITICAL ALPHA (PANIC)' : nVar > 0.003 ? 'VOL EXPANSION' : 'STABLE ACCUM'
           });
+                    // --- VOICE ALERT ENGINE ---
+          const announce = (text: string) => {
+            if (window.speechSynthesis.speaking) return; // Don't overlap voices
+            const msg = new SpeechSynthesisUtterance(text);
+            msg.rate = 0.9;
+            window.speechSynthesis.speak(msg);
+          };
+
+          if (isPanic && metrics.regime !== 'CRITICAL ALPHA (PANIC)') {
+            announce("Warning. Critical Alpha. Price Panic Detected.");
+          } else if (nVar > 0.003 && metrics.regime === 'STABLE ACCUM') {
+            announce("Volatility Expansion detected.");
+          }
+
         })
         .catch(err => console.error('Feed Error:', err));
     };
@@ -91,7 +105,21 @@ export default function App() {
 
       {/* METRICS GRID */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginTop: '20px' }}>
-        <Stat label="Z-SHOCK" val={metrics.z.toFixed(2)} color={metrics.z < 0 ? '#ff4444' : '#00ffcc'} />
+                <div style={{ background: '#0a0a0a', padding: '12px', border: '1px solid #111', overflow: 'hidden' }}>
+          <div style={{ fontSize: '8px', color: '#444' }}>Z-PRESSURE</div>
+          <div style={{ fontSize: '14px', color: metrics.z < 0 ? '#ff4444' : '#00ffcc' }}>
+            {metrics.z.toFixed(2)}
+          </div>
+          {/* PRESSURE BAR */}
+          <div style={{ 
+            marginTop: '4px',
+            height: '2px', 
+            background: metrics.z < 0 ? '#ff4444' : '#00ffcc', 
+            width: `${Math.min(Math.abs(metrics.z) * 20, 100)}%`,
+            boxShadow: metrics.z < -2 ? '0 0 8px #ff4444' : 'none',
+            transition: 'width 0.4s ease' 
+          }} />
+        </div>
         <Stat label="MOMENTUM" val={metrics.rsi.toFixed(0)} color="#fbbf24" />
         <Stat label="VOL-CORE" val={(metrics.vol * 100).toFixed(4)} color="#22d3ee" />
       </div>
