@@ -1,19 +1,27 @@
 import React, { useState, useEffect, useRef } from 'react';
-import * as Lucide from 'lucide-react';
 
 /**
- * SENTINEL GOLD V9.4 - RENDER STABLE
+ * SENTINEL GOLD V9.5 - ZERO-CONFIG / NATIVE SVG
  * -----------------------------------------------
  * Logic: GARCH-M Volatility + SMC Vector Targets
- * Fix: Explicit object notation for CONFIG to resolve 16:22 build error
+ * Fix: Removed CONFIG object and Lucide library to bypass buildEnd errors.
  */
 
-// Explicitly defined config to prevent "Expected {" errors
+[span_1](start_span)// FLAT CONSTANTS (Fixes line 16:22 "Expected {" error)[span_1](end_span)
 const SYMBOL = 'paxgusdt';
-const GARCH_ALPHA = 0.12;
-const GARCH_BETA = 0.85;
-const GARCH_OMEGA = 0.03;
+const G_ALPHA = 0.12;
+const G_BETA = 0.85;
+const G_OMEGA = 0.03;
 const BOX_MULT = 0.5;
+
+// NATIVE SVG COMPONENTS
+const IconUp = () => <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" className="rotate-180"><path d="M12 5l9 14H3l9-14z" /></svg>;
+const IconDown = () => <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5l9 14H3l9-14z" /></svg>;
+const IconZap = ({ active }: { active: boolean }) => (
+  <svg width="28" height="28" viewBox="0 0 24 24" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+  </svg>
+);
 
 export default function App() {
   const [isRunning, setIsRunning] = useState(true);
@@ -46,9 +54,9 @@ export default function App() {
         const isBuyer = !d.m;
         const diff = priceRef.current ? p - priceRef.current : 0;
 
-        // 1. GARCH-M & SIGMA Logic
+        [span_2](start_span)// 1. GARCH-M & SIGMA[span_2](end_span)
         const epsilonSq = Math.pow(diff, 2);
-        const nextVar = GARCH_OMEGA + GARCH_ALPHA * epsilonSq + GARCH_BETA * varianceRef.current;
+        const nextVar = G_OMEGA + G_ALPHA * epsilonSq + G_BETA * varianceRef.current;
         varianceRef.current = nextVar;
         const vol = Math.sqrt(nextVar);
         const z = diff / (vol || 0.001);
@@ -90,7 +98,7 @@ export default function App() {
 
   if (loading) return (
     <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center">
-      <Lucide.Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-4" />
+      <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
       <span className="text-[10px] font-black text-blue-500 tracking-widest uppercase">Sentinel Loading</span>
     </div>
   );
@@ -106,10 +114,10 @@ export default function App() {
           <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Execution Ticks</span>
           <div className="flex gap-4">
             <div className="flex items-center gap-1 text-blue-500">
-              <Lucide.Triangle size={10} className="fill-current rotate-180" /><span className="text-[12px] font-black">{metrics.ticks.up}</span>
+              <IconUp /><span className="text-[12px] font-black">{metrics.ticks.up}</span>
             </div>
             <div className="flex items-center gap-1 text-red-500">
-              <Lucide.Triangle size={10} className="fill-current" /><span className="text-[12px] font-black">{metrics.ticks.down}</span>
+              <IconDown /><span className="text-[12px] font-black">{metrics.ticks.down}</span>
             </div>
           </div>
         </div>
@@ -175,6 +183,13 @@ export default function App() {
           ))}
         </div>
       </div>
+
+      <footer className="fixed bottom-8 left-0 right-0 flex justify-center">
+        <button onClick={() => setIsRunning(!isRunning)} 
+                className={`p-6 rounded-full border-2 transition-all duration-500 active:scale-95 ${isRunning ? 'bg-blue-600/10 border-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.25)]' : 'bg-red-900/10 border-red-500'}`}>
+          <IconZap active={isRunning} />
+        </button>
+      </footer>
 
     </div>
   );
