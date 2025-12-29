@@ -2,15 +2,14 @@ import { useState, useEffect, useRef } from 'react';
 
 export default function App() {
   const [price, setPrice] = useState(0);
-  const [metrics, setMetrics] = useState({ vol: 0, z: 0, rsi: 50, regime: 'INITIALIZING' });
-  
-  // TF=1m Buffers
+  const [metrics, setMetrics] = useState({ vol: 0, z: 0, rsi: 50, sigma: 0, premium: 0, buyTicks: 0, sellTicks: 0 });
   const [minuteHistory, setMinuteHistory] = useState<number[]>([]);
   const [rsiHistory, setRsiHistory] = useState<number[]>([]);
   
   const tickBuffer = useRef<number[]>([]);
   const lastVar = useRef(0.0001); 
   const history = useRef<number[]>([]);
+  const tradeCounters = useRef({ buy: 0, sell: 0 });
 
   useEffect(() => {
     const getPAXG = () => {
@@ -24,29 +23,43 @@ export default function App() {
           const ret = (val - prev) / prev;
           history.current = [...history.current, val].slice(-100);
 
-          // --- EGARCH V7.5 HYBRID CORE ---
+          // 1. STEALTH TRADE COUNTER (Tick Direction)
+          if (val > prev) tradeCounters.current.buy += 1;
+          if (val < prev) tradeCounters.current.sell += 1;
+
+          // 2. EGARCH + GARCH-M CORE
           const currentVol = Math.sqrt(lastVar.current);
           const z = ret / (currentVol || 0.0001);
+          
+          // GARCH-M: Volatility-adjusted return expectation
+          const riskPremium = 0.5 * lastVar.current; 
+          
           const logV = -0.45 + (0.92 * Math.log(lastVar.current)) + (0.12 * (Math.abs(z) - 0.797)) + (-0.15 * z);
           const nVar = Math.exp(logV);
           lastVar.current = nVar;
 
-          // --- 1-MINUTE TIME FRAME LOGIC ---
+          // 3. SIGMA & PREMIUM (From V7.5)
+          const avg = history.current.reduce((a, b) => a + b) / history.current.length;
+          const sigma = (val - avg) / (avg * currentVol || 1);
+          const premium = ((val - avg) / avg) * 100;
+
+          // 4. 1-MINUTE AGGREGATION
           tickBuffer.current.push(val);
-          if (tickBuffer.current.length >= 12) { // 12 ticks * 5s = 60s
-            const minuteClose = val;
-            const minuteRsi = 50 + (ret * 15000); // Sensitive Hybrid RSI
-            
-            setMinuteHistory(prev => [...prev, minuteClose].slice(-30));
-            setRsiHistory(prev => [...prev, minuteRsi].slice(-30));
-            tickBuffer.current = []; // Reset for next minute
+          if (tickBuffer.current.length >= 12) {
+            setMinuteHistory(prev => [...prev, val].slice(-30));
+            setRsiHistory(prev => [...prev, 50 + (ret * 15000)].slice(-30));
+            tickBuffer.current = [];
+            tradeCounters.current = { buy: 0, sell: 0 }; // Reset counters every minute
           }
 
           setMetrics({
             vol: Math.sqrt(nVar),
-            z: z,
+            z: z + riskPremium, // GARCH-M adjusted Shock
             rsi: 50 + (ret * 15000),
-            regime: nVar > 0.005 ? 'VOL EXPANSION' : 'STABLE ACCUM'
+            sigma: sigma,
+            premium: premium,
+            buyTicks: tradeCounters.current.buy,
+            sellTicks: tradeCounters.current.sell
           });
         })
         .catch(err => console.error('Feed Error:', err));
@@ -56,16 +69,55 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
+  const totalTicks = metrics.buyTicks + metrics.sellTicks || 1;
+  const buyPct = (metrics.buyTicks / totalTicks) * 100;
+
   return (
     <div style={{ background: '#050505', color: '#e5e5e5', minHeight: '100vh', padding: '20px', fontFamily: 'monospace' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', opacity: 0.6 }}>
-        <span style={{ fontSize: '10px' }}>SENTINEL V7.5 // SUPER HYBRID</span>
-        <span style={{ fontSize: '10px', color: '#00ffcc' }}>1m TF ACTIVE</span>
+      {/* PRICE BLOCK + GARCH-M */}
+      <div style={{ borderLeft: '3px solid #00ffcc', paddingLeft: '15px' }}>
+        <h1 style={{ fontSize: '40px', margin: '0' }}>${price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h1>
+        <div style={{ fontSize: '10px', color: '#666' }}>
+          GARCH-M PREMIUM: <span style={{ color: '#fbbf24' }}>+{(metrics.z * 0.01).toFixed(5)}%</span>
+        </div>
       </div>
 
+      {/* STEALTH TRADES COUNTER BAR */}
       <div style={{ marginTop: '20px' }}>
-        <h1 style={{ fontSize: '38px', margin: '0' }}>${price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h1>
-        <div style={{ color: '#00ffcc', fontSize: '12px' }}>{metrics.regime}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', marginBottom: '4px' }}>
+          <span style={{ color: '#00ffcc' }}>STEALTH BUY [{metrics.buyTicks}]</span>
+          <span style={{ color: '#ff4444' }}>[{metrics.sellTicks}] STEALTH SELL</span>
+        </div>
+        <div style={{ height: '6px', background: '#111', width: '100%', display: 'flex' }}>
+          <div style={{ width: `${buyPct}%`, background: '#00ffcc', transition: 'width 0.5s' }} />
+          <div style={{ flex: 1, background: '#ff4444' }} />
+        </div>
+      </div>
+
+      {/* CHART (1m TF) */}
+      <div style={{ marginTop: '20px', background: '#080808', border: '1px solid #151515', padding: '10px' }}>
+         <svg viewBox="0 0 300 100" style={{ width: '100%', height: '140px', overflow: 'visible' }}>
+            <polyline points={minuteHistory.map((p, i) => `${(i/29)*300},${100 - ((p - Math.min(...minuteHistory)) / (Math.max(...minuteHistory) - Math.min(...minuteHistory) || 1)) * 80}`).join(' ')} fill="none" stroke="#fff" strokeWidth="1.5" />
+            <polyline points={rsiHistory.map((r, i) => `${(i/29)*300},${50 - (r-50)}`).join(' ')} fill="none" stroke="#fbbf24" strokeWidth="1" opacity="0.5" />
+         </svg>
+      </div>
+
+      {/* V7.5 SUPER HYBRID METRICS */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '20px' }}>
+        <div style={{ background: '#0a0a0a', padding: '12px', border: '1px solid #111' }}>
+          <div style={{ fontSize: '8px', color: '#444' }}>SIGMA V7.5</div>
+          <div style={{ fontSize: '16px', color: '#22d3ee' }}>{metrics.sigma.toFixed(4)}σ</div>
+        </div>
+        <div style={{ background: '#0a0a0a', padding: '12px', border: '1px solid #111' }}>
+          <div style={{ fontSize: '8px', color: '#444' }}>MARKET PREMIUM</div>
+          <div style={{ fontSize: '16px', color: metrics.premium > 0 ? '#00ffcc' : '#ff4444' }}>
+            {metrics.premium.toFixed(4)}%
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
       </div>
 
       {/* TF=1m CHART OVERLAY */}
