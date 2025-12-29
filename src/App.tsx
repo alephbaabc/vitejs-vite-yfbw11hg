@@ -2,15 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as Lucide from 'lucide-react';
 
 /**
- * SENTINEL GOLD V8.9 - THE FINAL HYBRID RESTORATION
- * Reconstructed from V7.5 Baseline
+ * SENTINEL GOLD V8.9 - VITE-SAFE RESTORATION
+ * [span_1](start_span)Architecture based on V7.5 Hybrid Baseline[span_1](end_span)
  */
 
 const CONFIG = {
   SYMBOL: 'paxgusdt',
   GARCH: { ALPHA: 0.12, BETA: 0.85, OMEGA: 0.03 },
-  BOX_MULT: 0.5,
-  UPDATE_INT: 1000
+  BOX_MULT: 0.5
 };
 
 export default function App() {
@@ -19,18 +18,15 @@ export default function App() {
   const [prevPrice, setPrevPrice] = useState(0);
   const [loading, setLoading] = useState(true);
   
+  [span_2](start_span)// PERSISTENT QUANT ENGINE (No Resets)[span_2](end_span)
   const [metrics, setMetrics] = useState({
     ticks: { up: 0, down: 0 },
     stealth: { buy: 0, sell: 0 },
-    volatility: 0,
     zScore: 0,
     riskPremium: 0.045
   });
 
-  const [vectors, setVectors] = useState({
-    bullOB: 0, bearOB: 0, macroBull: 0, macroBear: 0
-  });
-
+  const [vectors, setVectors] = useState({ bullOB: 0, bearOB: 0 });
   const [rsi, setRsi] = useState(50);
   const [history, setHistory] = useState(new Array(45).fill(50));
   const [regime, setRegime] = useState("CALIBRATING...");
@@ -42,7 +38,7 @@ export default function App() {
   const updateQuantEngine = (p: number, isBuyer: boolean) => {
     const diff = priceRef.current ? p - priceRef.current : 0;
 
-    // 1. GARCH-M Volatility Modeling
+    [span_3](start_span)// 1. GARCH-M Volatility & Sigma[span_3](end_span)
     const epsilonSq = Math.pow(diff, 2);
     const nextVar = CONFIG.GARCH.OMEGA + CONFIG.GARCH.ALPHA * epsilonSq + CONFIG.GARCH.BETA * varianceRef.current;
     varianceRef.current = nextVar;
@@ -50,7 +46,7 @@ export default function App() {
     const z = diff / (vol || 0.001);
     const premium = 0.02 + (vol / (p * 0.001)) * 0.04;
 
-    // 2. Cumulative Persistence
+    [span_4](start_span)// 2. Cumulative Persistence (Ticks & Stealth)[span_4](end_span)
     setMetrics(prev => ({
       ...prev,
       ticks: { 
@@ -61,20 +57,17 @@ export default function App() {
         buy: (diff === 0 && isBuyer) ? prev.stealth.buy + 1 : prev.stealth.buy,
         sell: (diff === 0 && !isBuyer) ? prev.stealth.sell + 1 : prev.stealth.sell
       },
-      volatility: vol,
       zScore: z,
       riskPremium: Math.min(0.06, Math.max(0.02, premium))
     }));
 
-    // 3. SMC Vector Calculation
+    [span_5](start_span)// 3. SMC Vector Calculation[span_5](end_span)
     setVectors({
       bullOB: p - (vol * CONFIG.BOX_MULT),
-      bearOB: p + (vol * CONFIG.BOX_MULT),
-      macroBull: p - (vol * 2.5),
-      macroBear: p + (vol * 2.5)
+      bearOB: p + (vol * CONFIG.BOX_MULT)
     });
 
-    // 4. Flux Wave (EMA-Smoothed RSI)
+    [span_6](start_span)// 4. Flux Wave (EMA-Smoothed RSI)[span_6](end_span)
     const gain = diff > 0 ? diff : 0;
     const loss = diff < 0 ? Math.abs(diff) : 0;
     rsiState.current.avgGain = (rsiState.current.avgGain * 13 + gain) / 14;
@@ -82,7 +75,7 @@ export default function App() {
     const rs = rsiState.current.avgGain / (rsiState.current.avgLoss || 1);
     const currentRsi = 100 - (100 / (1 + rs));
 
-    // 5. Regime Logic
+    [span_7](start_span)// 5. Regime Logic[span_7](end_span)
     if (vol > 0.08) setRegime("VOLATILITY SHOCK");
     else if (Math.abs(z) > 1.5) setRegime("LIQUIDITY EXPANSION");
     else setRegime("MEAN REVERSION");
@@ -116,7 +109,7 @@ export default function App() {
   if (loading) return (
     <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center">
       <Lucide.Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-4" />
-      <span className="text-[10px] font-black text-blue-500 tracking-[.5em] uppercase">Booting Hybrid Engine</span>
+      <span className="text-[10px] font-black text-blue-500 tracking-widest uppercase">Booting Hybrid Engine</span>
     </div>
   );
 
@@ -125,7 +118,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#020617] text-white p-4 font-sans select-none overflow-x-hidden">
       
-      {/* SECTION 1: PRICE & AGGRESSIVE TICKS */}
+      [span_8](start_span){/* SECTION 1: PRICE & EXECUTION[span_8](end_span) */}
       <div className={cardBase}>
         <div className="flex justify-between items-start mb-1">
           <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Execution</span>
@@ -145,7 +138,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* SECTION 2: SMC VECTORS */}
+      [span_9](start_span){/* SECTION 2: SMC VECTORS[span_9](end_span) */}
       <div className={cardBase}>
         <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-3">SMC Vectors</span>
         <div className="grid grid-cols-2 gap-3">
@@ -160,7 +153,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* SECTION 3: STEALTH FLOW */}
+      [span_10](start_span){/* SECTION 3: STEALTH FLOW (ABSORPTION)[span_10](end_span) */}
       <div className={cardBase}>
         <div className="flex justify-between items-center mb-2">
           <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Stealth Flow</span>
@@ -172,7 +165,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* SECTION 4: SIGMA BIDIRECTIONAL */}
+      [span_11](start_span){/* SECTION 4: SIGMA BIDIRECTIONAL[span_11](end_span) */}
       <div className={cardBase}>
         <div className="flex justify-between items-center mb-3">
            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Sigma & Premium</span>
@@ -189,7 +182,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* SECTION 5: FLUX WAVE VISUALS */}
+      [span_12](start_span){/* SECTION 5: FLUX WAVE VISUALS (RSI)[span_12](end_span) */}
       <div className={cardBase}>
         <div className="flex justify-between items-center mb-2">
           <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest">Flux Wave</span>
@@ -203,7 +196,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* FOOTER REGIME */}
+      [span_13](start_span){/* REGIME FOOTER[span_13](end_span) */}
       <div className="p-4 bg-blue-600/10 border border-blue-500/20 rounded-[1.5rem] text-center backdrop-blur-md">
         <div className="text-[8px] font-black text-blue-500/50 uppercase tracking-[0.3em] mb-1">Market Regime</div>
         <div className="text-[11px] font-black tracking-widest text-white uppercase">{regime}</div>
