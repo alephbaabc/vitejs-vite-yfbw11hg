@@ -1,12 +1,26 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
 
-// Type definitions
-interface WebSocketMessage {
-  type: string;
-  data?: unknown;
-  payload?: unknown;
-  [key: string]: unknown;
+// FLUX Module with corrected JSX syntax
+const FLUX = () => {
+  const [value, setValue] = useState(0);
+
+  return (
+    <div className="flux-container">
+      <h3>FLUX Status</h3>
+      <p>Value: {value}</p>
+      <button onClick={() => setValue(value + 1)}>Increment</button>
+    </div>
+  );
+};
+
+interface CandleData {
+  timestamp: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
 }
 
 interface RSIData {
@@ -14,50 +28,15 @@ interface RSIData {
   timestamp: number;
 }
 
-interface FLUXModuleConfig {
-  enabled: boolean;
-  threshold?: number;
-}
-
-// FLUX Module with proper JSX syntax
-const FLUXModule: React.FC<{ config: FLUXModuleConfig }> = ({ config }) => {
-  const [fluxValue, setFluxValue] = useState<number>(0);
-
-  useEffect(() => {
-    if (config.enabled) {
-      // Initialize FLUX calculations
-      const interval = setInterval(() => {
-        setFluxValue((prev) => Math.random() * 100);
-      }, 1000);
-
-      return () => clearInterval(interval);
-    }
-  }, [config.enabled]);
-
-  if (!config.enabled) {
-    return null;
-  }
-
-  return (
-    <div className="flux-module">
-      <h3>FLUX Module</h3>
-      <p>Current Value: {fluxValue.toFixed(2)}</p>
-      {config.threshold && fluxValue > config.threshold && (
-        <span className="threshold-alert">Threshold exceeded!</span>
-      )}
-    </div>
-  );
-};
-
-// RSI Calculator - separated to avoid circular dependency
-const calculateRSI = (prices: number[], period: number = 14): number => {
-  if (prices.length < period + 1) return 0;
+// RSI Calculation moved before useEffect
+const calculateRSI = (data: number[], period: number = 14): number => {
+  if (data.length < period + 1) return 0;
 
   let gains = 0;
   let losses = 0;
 
-  for (let i = prices.length - period; i < prices.length; i++) {
-    const change = prices[i] - prices[i - 1];
+  for (let i = data.length - period; i < data.length; i++) {
+    const change = data[i] - data[i - 1];
     if (change > 0) {
       gains += change;
     } else {
@@ -68,134 +47,83 @@ const calculateRSI = (prices: number[], period: number = 14): number => {
   const avgGain = gains / period;
   const avgLoss = losses / period;
 
-  if (avgLoss === 0) return avgGain > 0 ? 100 : 0;
+  if (avgLoss === 0) return 100;
 
   const rs = avgGain / avgLoss;
-  return 100 - (100 / (1 + rs));
+  const rsi = 100 - (100 / (1 + rs));
+
+  return rsi;
 };
 
-// RSI Hook - avoids circular dependency by using pure function
-const useRSI = (prices: number[], period: number = 14) => {
-  const [rsiValue, setRsiValue] = useState<RSIData>({
-    value: 0,
-    timestamp: Date.now(),
-  });
-
-  useEffect(() => {
-    if (prices.length > 0) {
-      const newValue = calculateRSI(prices, period);
-      setRsiValue({
-        value: newValue,
-        timestamp: Date.now(),
-      });
-    }
-  }, [prices, period]);
-
-  return rsiValue;
-};
-
-// WebSocket Message Validator
-const validateWebSocketMessage = (message: unknown): message is WebSocketMessage => {
-  if (typeof message !== 'object' || message === null) {
-    return false;
-  }
-
-  const msg = message as Record<string, unknown>;
-
-  // Validate required fields
-  if (typeof msg.type !== 'string') {
-    console.error('Invalid message: missing or invalid type field');
-    return false;
-  }
-
-  // Validate optional data fields
-  if (msg.data !== undefined && msg.data !== null && typeof msg.data !== 'object') {
-    console.error('Invalid message: data field must be an object or null');
-    return false;
-  }
-
-  // Validate optional payload fields
-  if (msg.payload !== undefined && msg.payload !== null && typeof msg.payload !== 'object') {
-    console.error('Invalid message: payload field must be an object or null');
-    return false;
-  }
-
-  return true;
-};
-
-// Main App Component
 function App() {
-  const [wsConnected, setWsConnected] = useState<boolean>(false);
-  const [prices, setPrices] = useState<number[]>([]);
-  const [fluxConfig, setFluxConfig] = useState<FLUXModuleConfig>({
-    enabled: true,
-    threshold: 75,
-  });
+  const [candles, setCandles] = useState<CandleData[]>([]);
+  const [rsiValues, setRsiValues] = useState<RSIData[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const rsiData = useRSI(prices, 14);
 
-  // Initialize WebSocket connection with proper message validation
-  useEffect(() => {
-    const connectWebSocket = () => {
-      try {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        wsRef.current = new WebSocket(`${protocol}//${window.location.host}`);
+  // WebSocket connection handler with validation
+  const connectWebSocket = useCallback(() => {
+    try {
+      const ws = new WebSocket('wss://stream.example.com/data');
 
-        wsRef.current.onopen = () => {
-          setWsConnected(true);
-          console.log('WebSocket connected');
-        };
+      ws.onopen = () => {
+        setIsConnected(true);
+        setError(null);
+      };
 
-        wsRef.current.onmessage = (event) => {
-          try {
-            // Parse message safely
-            const rawData = JSON.parse(event.data);
+      ws.onmessage = (event) => {
+        try {
+          // Validate WebSocket data
+          const data = JSON.parse(event.data);
 
-            // Validate message structure
-            if (!validateWebSocketMessage(rawData)) {
-              console.warn('Received invalid WebSocket message:', rawData);
-              return;
-            }
-
-            // Process valid messages
-            if (rawData.type === 'price_update' && rawData.data) {
-              const priceData = rawData.data as Record<string, unknown>;
-              if (typeof priceData.price === 'number') {
-                setPrices((prev) => [...prev.slice(-99), priceData.price]);
-              }
-            } else if (rawData.type === 'flux_config' && rawData.payload) {
-              const configPayload = rawData.payload as Record<string, unknown>;
-              setFluxConfig((prev) => ({
-                ...prev,
-                ...(typeof configPayload.threshold === 'number' && {
-                  threshold: configPayload.threshold,
-                }),
-                ...(typeof configPayload.enabled === 'boolean' && {
-                  enabled: configPayload.enabled,
-                }),
-              }));
-            }
-          } catch (error) {
-            console.error('Failed to process WebSocket message:', error);
+          if (!data || typeof data !== 'object') {
+            throw new Error('Invalid data format');
           }
-        };
 
-        wsRef.current.onerror = (error) => {
-          console.error('WebSocket error:', error);
-          setWsConnected(false);
-        };
+          if (data.type === 'candle') {
+            if (
+              !data.payload ||
+              typeof data.payload.close !== 'number' ||
+              typeof data.payload.timestamp !== 'number'
+            ) {
+              throw new Error('Invalid candle data structure');
+            }
 
-        wsRef.current.onclose = () => {
-          setWsConnected(false);
-          console.log('WebSocket disconnected');
-          // Attempt reconnection after 3 seconds
-          setTimeout(connectWebSocket, 3000);
-        };
-      } catch (error) {
-        console.error('Failed to initialize WebSocket:', error);
-      }
-    };
+            const newCandle: CandleData = {
+              timestamp: data.payload.timestamp,
+              open: data.payload.open || 0,
+              high: data.payload.high || data.payload.close,
+              low: data.payload.low || data.payload.close,
+              close: data.payload.close,
+              volume: data.payload.volume || 0,
+            };
 
+            setCandles((prev) => [...prev.slice(-99), newCandle]);
+          }
+        } catch (err) {
+          setError(`WebSocket data error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          console.error('WebSocket message error:', err);
+        }
+      };
+
+      ws.onerror = () => {
+        setError('WebSocket connection error');
+        setIsConnected(false);
+      };
+
+      ws.onclose = () => {
+        setIsConnected(false);
+      };
+
+      wsRef.current = ws;
+    } catch (err) {
+      setError(`Connection failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  }, []);
+
+  // Main effect for WebSocket connection
+  useEffect(() => {
     connectWebSocket();
 
     return () => {
@@ -203,78 +131,75 @@ function App() {
         wsRef.current.close();
       }
     };
-  }, []);
+  }, [connectWebSocket]);
 
-  const sendWebSocketMessage = useCallback(
-    (message: WebSocketMessage) => {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify(message));
-      }
-    },
-    []
-  );
+  // Calculate RSI values when candles update
+  useEffect(() => {
+    if (candles.length > 0) {
+      const closePrices = candles.map((c) => c.close);
+      const rsi = calculateRSI(closePrices);
 
-  const addPrice = useCallback(() => {
-    const newPrice = Math.random() * 100 + 50;
-    setPrices((prev) => [...prev.slice(-99), newPrice]);
-  }, []);
+      setRsiValues((prev) => [
+        ...prev.slice(-99),
+        {
+          value: rsi,
+          timestamp: candles[candles.length - 1].timestamp,
+        },
+      ]);
+    }
+  }, [candles]);
 
   return (
-    <div className="app-container">
-      <header>
-        <h1>Vite + React + TypeScript</h1>
-        <div className="status">
-          <span className={`indicator ${wsConnected ? 'connected' : 'disconnected'}`}></span>
-          WebSocket: {wsConnected ? 'Connected' : 'Disconnected'}
+    <div className="App">
+      <header className="App-header">
+        <h1>Trading Dashboard</h1>
+        
+        {/* Connection Status */}
+        <div className={`status ${isConnected ? 'connected' : 'disconnected'}`}>
+          <span>{isConnected ? '🟢 Connected' : '🔴 Disconnected'}</span>
+        </div>
+
+        {/* Error Display */}
+        {error && (
+          <div className="error-banner">
+            <p>{error}</p>
+            <button onClick={() => setError(null)}>Dismiss</button>
+          </div>
+        )}
+
+        {/* FLUX Module */}
+        <FLUX />
+
+        {/* Statistics */}
+        <div className="stats">
+          <div className="stat-card">
+            <h3>Total Candles</h3>
+            <p>{candles.length}</p>
+          </div>
+          <div className="stat-card">
+            <h3>Latest Price</h3>
+            <p>${candles.length > 0 ? candles[candles.length - 1].close.toFixed(2) : 'N/A'}</p>
+          </div>
+          <div className="stat-card">
+            <h3>Current RSI</h3>
+            <p>{rsiValues.length > 0 ? rsiValues[rsiValues.length - 1].value.toFixed(2) : 'N/A'}</p>
+          </div>
+        </div>
+
+        {/* Recent Candles */}
+        <div className="candles-list">
+          <h3>Recent Candles</h3>
+          <ul>
+            {candles.slice(-5).map((candle, idx) => (
+              <li key={idx}>
+                <span>Close: ${candle.close.toFixed(2)}</span>
+                <span>High: ${candle.high.toFixed(2)}</span>
+                <span>Low: ${candle.low.toFixed(2)}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </header>
-
-      <main>
-        <section className="modules">
-          <FLUXModule config={fluxConfig} />
-
-          <div className="rsi-module">
-            <h3>RSI Indicator</h3>
-            <p>RSI Value: {rsiData.value.toFixed(2)}</p>
-            <p>Last Updated: {new Date(rsiData.timestamp).toLocaleTimeString()}</p>
-            <p>Data Points: {prices.length}</p>
-          </div>
-        </section>
-
-        <section className="controls">
-          <button onClick={addPrice} className="btn-primary">
-            Add Price Data
-          </button>
-          <button
-            onClick={() =>
-              sendWebSocketMessage({
-                type: 'request_update',
-                data: { timestamp: Date.now() },
-              })
-            }
-            className="btn-secondary"
-            disabled={!wsConnected}
-          >
-            Request Update
-          </button>
-          <button
-            onClick={() =>
-              sendWebSocketMessage({
-                type: 'toggle_flux',
-                payload: { enabled: !fluxConfig.enabled },
-              })
-            }
-            className="btn-secondary"
-          >
-            Toggle FLUX Module
-          </button>
-        </section>
-
-        <section className="debug-info">
-          <h3>Debug Information</h3>
-          <pre>{JSON.stringify({ wsConnected, rsiValue: rsiData.value, priceCount: prices.length }, null, 2)}</pre>
-        </section>
-      </main>
     </div>
   );
 }
