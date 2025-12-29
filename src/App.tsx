@@ -1,148 +1,153 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import * as Lucide from 'lucide-react';
 
+[span_7](start_span)// EXACT V7.5 HYBRID CONFIG[span_7](end_span)
 const CONFIG = {
+  SYMBOL: 'paxgusdt',
   GARCH: { ALPHA: 0.12, BETA: 0.85, OMEGA: 0.03 },
-  FLUX_SMOOTH: 0.70
+  BOX_MULT: 0.5
 };
 
 export default function App() {
   const [price, setPrice] = useState(0);
-  const [metrics, setMetrics] = useState<any>({
-    upTicks: 0, downTicks: 0, stealthBuy: 0, stealthSell: 0,
-    flux: 50, sigma: 0, premium: 0.045
+  const [prevPrice, setPrevPrice] = useState(0);
+  
+  [span_8](start_span)// PERSISTENT QUANT ENGINE[span_8](end_span)
+  const [metrics, setMetrics] = useState({
+    ticks: { up: 0, down: 0 },
+    stealth: { buy: 0, sell: 0 },
+    zScore: 0,
+    riskPremium: 0.045
   });
 
-  const [history, setHistory] = useState<number[]>([]);
-  const [fluxHistory, setFluxHistory] = useState<number[]>([]);
+  const [rsi, setRsi] = useState(50);
+  const [history, setHistory] = useState(new Array(45).fill(50));
   
-  const lastVar = useRef(0.0001);
-  const counters = useRef({ up: 0, down: 0, sBuy: 0, sSell: 0 });
-  const chartBuffer = useRef<number[]>([]);
+  const priceRef = useRef(0);
+  const varianceRef = useRef(0.01);
+  const rsiState = useRef({ avgGain: 0, avgLoss: 0 });
 
   useEffect(() => {
-    const fetchEngine = async () => {
-      try {
-        const r = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT');
-        const d = await r.json();
-        const val = parseFloat(d.price);
-        if (!val) return;
+    const ws = new WebSocket(`wss://stream.binance.com:9443/ws/${CONFIG.SYMBOL}@aggTrade`);
+    ws.onmessage = (e) => {
+      const d = JSON.parse(e.data);
+      const p = parseFloat(d.p);
+      const isBuyer = !d.m;
 
-        setPrice((prev) => {
-          if (prev !== 0) {
-            // SEGMENT 1 & 2: TICK vs STEALTH LOGIC
-            if (val > prev) counters.current.up += 1;
-            else if (val < prev) counters.current.down += 1;
-            else {
-              // Stealth Trade logic based on Flux bias
-              if (metrics.flux > 50) counters.current.sBuy += 1;
-              else counters.current.sSell += 1;
-            }
-          }
-          const ret = prev !== 0 ? (val - prev) / prev : 0;
-          
-          // GARCH-M & SIGMA MATH
-          const h = CONFIG.GARCH.OMEGA + CONFIG.GARCH.ALPHA * Math.pow(ret, 2) + CONFIG.GARCH.BETA * lastVar.current;
-          lastVar.current = h;
-          const vol = Math.sqrt(h);
-          const avg = chartBuffer.current.reduce((a,b)=>a+b,0) / (chartBuffer.current.length || 1);
-          const sigma = (val - avg) / (avg * vol || 0.0001);
+      const diff = priceRef.current ? p - priceRef.current : 0;
 
-          // RSI FLUX (VISUAL ONLY)
-          const mom = 50 + (ret * 22000);
-          const newFlux = (mom * (1 - CONFIG.FLUX_SMOOTH)) + (metrics.flux * CONFIG.FLUX_SMOOTH);
+      [span_9](start_span)// 1. GARCH-M & SIGMA[span_9](end_span)
+      const epsilonSq = Math.pow(diff, 2);
+      const nextVar = CONFIG.GARCH.OMEGA + CONFIG.GARCH.ALPHA * epsilonSq + CONFIG.GARCH.BETA * varianceRef.current;
+      varianceRef.current = nextVar;
+      const vol = Math.sqrt(nextVar);
+      const z = diff / (vol || 0.001);
+      const premium = 0.02 + (vol / (p * 0.001)) * 0.04;
 
-          setMetrics((m:any) => ({
-            ...m,
-            upTicks: counters.current.up,
-            downTicks: counters.current.down,
-            stealthBuy: counters.current.sBuy,
-            stealthSell: counters.current.sSell,
-            flux: newFlux,
-            sigma: sigma,
-            premium: vol * 0.5
-          }));
+      [span_10](start_span)// 2. CUMULATIVE PERSISTENCE[span_10](end_span)
+      setMetrics(prev => ({
+        ...prev,
+        ticks: { 
+          up: diff > 0 ? prev.ticks.up + 1 : prev.ticks.up, 
+          down: diff < 0 ? prev.ticks.down + 1 : prev.ticks.down 
+        },
+        stealth: {
+          buy: (diff === 0 && isBuyer) ? prev.stealth.buy + 1 : prev.stealth.buy,
+          sell: (diff === 0 && !isBuyer) ? prev.stealth.sell + 1 : prev.stealth.sell
+        },
+        zScore: z,
+        riskPremium: Math.min(0.06, Math.max(0.02, premium))
+      }));
 
-          return val;
-        });
+      [span_11](start_span)// 3. FLUX WAVE MATH[span_11](end_span)
+      const gain = diff > 0 ? diff : 0;
+      const loss = diff < 0 ? Math.abs(diff) : 0;
+      rsiState.current.avgGain = (rsiState.current.avgGain * 13 + gain) / 14;
+      rsiState.current.avgLoss = (rsiState.current.avgLoss * 13 + loss) / 14;
+      const rs = rsiState.current.avgGain / (rsiState.current.avgLoss || 1);
+      const currentRsi = 100 - (100 / (1 + rs));
 
-        chartBuffer.current.push(val);
-        if (chartBuffer.current.length >= 12) {
-          setHistory(h => [...h, val].slice(-35));
-          setFluxHistory(f => [...f, metrics.flux].slice(-35));
-          chartBuffer.current = [];
-        }
-      } catch (e) { console.log("Lag"); }
+      setPrevPrice(priceRef.current);
+      setPrice(p);
+      setRsi(currentRsi);
+      priceRef.current = p;
     };
 
-    const id = setInterval(fetchEngine, 1000);
-    return () => clearInterval(id);
-  }, [metrics.flux]);
+    const ticker = setInterval(() => {
+      setHistory(prev => [...prev.slice(1), rsi]);
+    }, 1000);
+
+    return () => { ws.close(); clearInterval(ticker); };
+  }, [rsi]);
+
+  const cardBase = "p-5 bg-[#0a0f1e] border border-slate-800/60 rounded-[2rem] backdrop-blur-xl mb-4";
 
   return (
-    <div style={{ background: '#020202', color: '#eee', minHeight: '100vh', padding: '15px', fontFamily: 'monospace' }}>
+    <div className="min-h-screen bg-[#020617] text-white p-4 font-sans select-none">
       
-      {/* SECTION 1: PRICE & SIGMA (STATISTICAL) */}
-      <div style={{ marginBottom: '20px', padding: '15px', background: '#080808', border: '1px solid #151515' }}>
-        <h1 style={{ fontSize: '38px', margin: '0', color: '#00ffcc' }}>${price.toLocaleString()}</h1>
-        <div style={{ marginTop: '10px' }}>
-          <div style={{ fontSize: '9px', color: '#444', marginBottom: '4px' }}>SIGMA VARIANCE (±3σ)</div>
-          <div style={{ height: '10px', background: '#111', position: 'relative', display: 'flex', alignItems: 'center' }}>
-            <div style={{ position: 'absolute', left: '50%', width: '2px', height: '100%', background: '#333', zIndex: 1 }} />
-            <div style={{ 
-              position: 'absolute', 
-              left: metrics.sigma < 0 ? `calc(50% - ${Math.min(Math.abs(metrics.sigma) * 16, 50)}%)` : '50%',
-              width: `${Math.min(Math.abs(metrics.sigma) * 16, 50)}%`,
-              height: '100%',
-              background: metrics.sigma > 0 ? '#00ffcc' : '#ff4444'
-            }} />
+      [span_12](start_span){/* SECTION 1: PRICE & AGGRESSIVE TICKS[span_12](end_span) */}
+      <div className={cardBase}>
+        <div className="flex justify-between items-start mb-2">
+          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Execution</span>
+          <div className="flex gap-4">
+            <div className="flex items-center gap-1 text-blue-500">
+              <Lucide.Triangle size={10} className="fill-current rotate-180" />
+              <span className="text-[12px] font-black">{metrics.ticks.up}</span>
+            </div>
+            <div className="flex items-center gap-1 text-red-500">
+              <Lucide.Triangle size={10} className="fill-current" />
+              <span className="text-[12px] font-black">{metrics.ticks.down}</span>
+            </div>
           </div>
         </div>
-      </div>
-
-      {/* SECTION 2: TICK COUNTERS (AGGRESSIVE MOVERS) */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
-        <div style={{ background: '#080808', padding: '15px', textAlign: 'center', border: '1px solid #151515' }}>
-          <div style={{ color: '#00ffcc', fontSize: '24px' }}>▲</div>
-          <div style={{ fontSize: '18px', fontWeight: 'bold' }}>{metrics.upTicks}</div>
-          <div style={{ fontSize: '8px', color: '#444' }}>AGGRESSIVE UP</div>
-        </div>
-        <div style={{ background: '#080808', padding: '15px', textAlign: 'center', border: '1px solid #151515' }}>
-          <div style={{ color: '#ff4444', fontSize: '24px' }}>▼</div>
-          <div style={{ fontSize: '18px', fontWeight: 'bold' }}>{metrics.downTicks}</div>
-          <div style={{ fontSize: '8px', color: '#444' }}>AGGRESSIVE DOWN</div>
+        <div className={`text-5xl font-black tracking-tighter ${price >= prevPrice ? 'text-blue-500' : 'text-red-500'}`}>
+          ${price ? price.toFixed(2) : "0.00"}
         </div>
       </div>
 
-      {/* SECTION 3: STEALTH TRADES (ABSORPTION BARS) */}
-      <div style={{ padding: '15px', background: '#080808', border: '1px solid #151515', marginBottom: '20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: '#666', marginBottom: '5px' }}>
-          <span>STEALTH BUY: {metrics.stealthBuy}</span>
-          <span>STEALTH SELL: {metrics.stealthSell}</span>
+      [span_13](start_span){/* SECTION 2: STEALTH FLOW (ABSORPTION)[span_13](end_span) */}
+      <div className={cardBase}>
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Stealth Flow</span>
+          <div className="text-[10px] font-black"><span className="text-blue-500">{metrics.stealth.buy}</span> / <span className="text-red-500">{metrics.stealth.sell}</span></div>
         </div>
-        <div style={{ height: '8px', background: '#111', display: 'flex', borderRadius: '4px', overflow: 'hidden' }}>
-          <div style={{ width: `${(metrics.stealthBuy / (metrics.stealthBuy + metrics.stealthSell || 1)) * 100}%`, background: '#6366f1' }} />
-          <div style={{ flex: 1, background: '#f43f5e' }} />
+        <div className="h-3 bg-red-900/30 rounded-full overflow-hidden border border-white/5 relative">
+          <div className="h-full bg-blue-600 transition-all duration-700" 
+               style={{ width: `${(metrics.stealth.buy/(metrics.stealth.buy+metrics.stealth.sell||1))*100}%` }}></div>
         </div>
       </div>
 
-      {/* SECTION 4: RSI FLUX WAVES (VISUAL CHART) */}
-      <div style={{ background: '#080808', border: '1px solid #151515', padding: '15px' }}>
-        <div style={{ fontSize: '9px', color: '#444', marginBottom: '10px' }}>FLUX MOMENTUM (GOLD) / PRICE (WHITE)</div>
-        <svg viewBox="0 0 300 100" style={{ width: '100%', height: '180px', overflow: 'visible' }}>
-          {history.length > 1 && (
-            <polyline 
-              points={history.map((p, i) => `${(i / (history.length - 1)) * 300},${100 - ((p - Math.min(...history)) / (Math.max(...history) - Math.min(...history) || 1)) * 80}`).join(' ')} 
-              fill="none" stroke="#fff" strokeWidth="1.5" 
-            />
-          )}
-          {fluxHistory.length > 1 && (
-            <polyline 
-              points={fluxHistory.map((f, i) => `${(i / (fluxHistory.length - 1)) * 300},${50 - (f - 50)}`).join(' ')} 
-              fill="none" stroke="#fbbf24" strokeWidth="1" opacity="0.6" 
-            />
-          )}
-        </svg>
+      [span_14](start_span){/* SECTION 3: SIGMA & PREMIUM (BIDIRECTIONAL BAR)[span_14](end_span) */}
+      <div className={cardBase}>
+        <div className="flex justify-between items-center mb-3">
+           <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Sigma Variance</span>
+           <span className="text-[10px] font-black text-blue-400">+{metrics.riskPremium.toFixed(4)}%</span>
+        </div>
+        <div className="relative h-2.5 bg-black/60 rounded-full overflow-hidden border border-white/5">
+          <div className="absolute left-1/2 w-0.5 h-full bg-white/40 z-10"></div>
+          <div className={`absolute h-full transition-all duration-500 ${metrics.zScore > 0 ? 'bg-blue-500' : 'bg-red-500'}`}
+               style={{ 
+                 width: `${Math.min(50, Math.abs(metrics.zScore) * 15)}%`, 
+                 left: metrics.zScore > 0 ? '50%' : 'auto', 
+                 right: metrics.zScore < 0 ? '50%' : 'auto' 
+               }} />
+        </div>
       </div>
+
+      [span_15](start_span){/* SECTION 4: FLUX WAVE (VISUAL HISTORY)[span_15](end_span) */}
+      <div className={cardBase}>
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest">Flux Wave</span>
+          <span className="text-lg font-black italic">{rsi.toFixed(0)}</span>
+        </div>
+        <div className="h-14 flex items-end gap-[1.5px] bg-black/40 rounded-xl px-2 py-1 border border-white/5 overflow-hidden">
+          {history.map((v, i) => (
+            <div key={i} className={`flex-1 rounded-t-sm transition-all duration-500 ${v > 70 ? 'bg-blue-500' : v < 30 ? 'bg-red-500' : 'bg-slate-700'}`} 
+                 style={{ height: `${Math.max(10, v)}%`, opacity: 0.3 + (i / 45) }} />
+          ))}
+        </div>
+      </div>
+
     </div>
   );
 }
