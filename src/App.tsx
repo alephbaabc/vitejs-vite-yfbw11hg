@@ -1,205 +1,130 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as Lucide from 'lucide-react';
 
-/**
- * SENTINEL GOLD V8.9 - VITE-SAFE RESTORATION
- * [span_1](start_span)Architecture based on V7.5 Hybrid Baseline[span_1](end_span)
- */
-
-const CONFIG = {
-  SYMBOL: 'paxgusdt',
-  GARCH: { ALPHA: 0.12, BETA: 0.85, OMEGA: 0.03 },
-  BOX_MULT: 0.5
-};
+const SYMBOL = 'paxgusdt';
 
 export default function App() {
-  const [isRunning, setIsRunning] = useState(true);
   const [price, setPrice] = useState(0);
-  const [prevPrice, setPrevPrice] = useState(0);
-  const [loading, setLoading] = useState(true);
-  
-  [span_2](start_span)// PERSISTENT QUANT ENGINE (No Resets)[span_2](end_span)
-  const [metrics, setMetrics] = useState({
-    ticks: { up: 0, down: 0 },
-    stealth: { buy: 0, sell: 0 },
-    zScore: 0,
-    riskPremium: 0.045
+  const [data, setData] = useState({
+    up: 0, down: 0, sBuy: 0, sSell: 0, sigma: 0, rsi: 50
+  });
+  const [history, setHistory] = useState<number[]>(new Array(40).fill(50));
+
+  const engine = useRef({
+    lastP: 0,
+    var: 0.01,
+    gain: 0,
+    loss: 0
   });
 
-  const [vectors, setVectors] = useState({ bullOB: 0, bearOB: 0 });
-  const [rsi, setRsi] = useState(50);
-  const [history, setHistory] = useState(new Array(45).fill(50));
-  const [regime, setRegime] = useState("CALIBRATING...");
-
-  const priceRef = useRef(0);
-  const varianceRef = useRef(0.01);
-  const rsiState = useRef({ avgGain: 0, avgLoss: 0 });
-
-  const updateQuantEngine = (p: number, isBuyer: boolean) => {
-    const diff = priceRef.current ? p - priceRef.current : 0;
-
-    [span_3](start_span)// 1. GARCH-M Volatility & Sigma[span_3](end_span)
-    const epsilonSq = Math.pow(diff, 2);
-    const nextVar = CONFIG.GARCH.OMEGA + CONFIG.GARCH.ALPHA * epsilonSq + CONFIG.GARCH.BETA * varianceRef.current;
-    varianceRef.current = nextVar;
-    const vol = Math.sqrt(nextVar);
-    const z = diff / (vol || 0.001);
-    const premium = 0.02 + (vol / (p * 0.001)) * 0.04;
-
-    [span_4](start_span)// 2. Cumulative Persistence (Ticks & Stealth)[span_4](end_span)
-    setMetrics(prev => ({
-      ...prev,
-      ticks: { 
-        up: diff > 0 ? prev.ticks.up + 1 : prev.ticks.up, 
-        down: diff < 0 ? prev.ticks.down + 1 : prev.ticks.down 
-      },
-      stealth: {
-        buy: (diff === 0 && isBuyer) ? prev.stealth.buy + 1 : prev.stealth.buy,
-        sell: (diff === 0 && !isBuyer) ? prev.stealth.sell + 1 : prev.stealth.sell
-      },
-      zScore: z,
-      riskPremium: Math.min(0.06, Math.max(0.02, premium))
-    }));
-
-    [span_5](start_span)// 3. SMC Vector Calculation[span_5](end_span)
-    setVectors({
-      bullOB: p - (vol * CONFIG.BOX_MULT),
-      bearOB: p + (vol * CONFIG.BOX_MULT)
-    });
-
-    [span_6](start_span)// 4. Flux Wave (EMA-Smoothed RSI)[span_6](end_span)
-    const gain = diff > 0 ? diff : 0;
-    const loss = diff < 0 ? Math.abs(diff) : 0;
-    rsiState.current.avgGain = (rsiState.current.avgGain * 13 + gain) / 14;
-    rsiState.current.avgLoss = (rsiState.current.avgLoss * 13 + loss) / 14;
-    const rs = rsiState.current.avgGain / (rsiState.current.avgLoss || 1);
-    const currentRsi = 100 - (100 / (1 + rs));
-
-    [span_7](start_span)// 5. Regime Logic[span_7](end_span)
-    if (vol > 0.08) setRegime("VOLATILITY SHOCK");
-    else if (Math.abs(z) > 1.5) setRegime("LIQUIDITY EXPANSION");
-    else setRegime("MEAN REVERSION");
-
-    setPrevPrice(priceRef.current);
-    setPrice(p);
-    setRsi(currentRsi);
-    priceRef.current = p;
-  };
-
   useEffect(() => {
-    let ws: WebSocket;
-    if (isRunning) {
-      ws = new WebSocket(`wss://stream.binance.com:9443/ws/${CONFIG.SYMBOL}@aggTrade`);
-      ws.onmessage = (e) => {
-        const d = JSON.parse(e.data);
-        updateQuantEngine(parseFloat(d.p), !d.m);
-      };
-      setTimeout(() => setLoading(false), 1200);
-      return () => ws?.close();
-    }
-  }, [isRunning]);
+    const ws = new WebSocket(`wss://stream.binance.com:9443/ws/${SYMBOL}@aggTrade`);
+    
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      const p = parseFloat(msg.p);
+      const isBuyer = !msg.m;
+      const e = engine.current;
 
-  useEffect(() => {
-    const ticker = setInterval(() => {
-      setHistory(prev => [...prev.slice(1), rsi]);
+      if (e.lastP === 0) { e.lastP = p; return; }
+      
+      const diff = p - e.lastP;
+
+      // 1. GARCH/SIGMA CALC
+      const nextVar = 0.03 + 0.12 * Math.pow(diff, 2) + 0.85 * e.var;
+      e.var = nextVar;
+      const sigma = diff / (Math.sqrt(nextVar) || 0.001);
+
+      // 2. RSI FLUX CALC
+      const g = diff > 0 ? diff : 0;
+      const l = diff < 0 ? Math.abs(diff) : 0;
+      e.gain = (e.gain * 13 + g) / 14;
+      e.loss = (e.loss * 13 + l) / 14;
+      const currentRsi = 100 - (100 / (1 + (e.gain / (e.loss || 1))));
+
+      setData(prev => ({
+        up: diff > 0 ? prev.up + 1 : prev.up,
+        down: diff < 0 ? prev.down + 1 : prev.down,
+        sBuy: (diff === 0 && isBuyer) ? prev.sBuy + 1 : prev.sBuy,
+        sSell: (diff === 0 && !isBuyer) ? prev.sSell + 1 : prev.sSell,
+        sigma: sigma,
+        rsi: currentRsi
+      }));
+
+      e.lastP = p;
+      setPrice(p);
+    };
+
+    const interval = setInterval(() => {
+      setHistory(h => [...h.slice(1), engine.current.gain > 0 ? 50 + (engine.current.gain * 1000) : 50]);
     }, 1000);
-    return () => clearInterval(ticker);
-  }, [rsi]);
 
-  if (loading) return (
-    <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center">
-      <Lucide.Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-4" />
-      <span className="text-[10px] font-black text-blue-500 tracking-widest uppercase">Booting Hybrid Engine</span>
-    </div>
-  );
+    return () => { ws.close(); clearInterval(interval); };
+  }, []);
 
-  const cardBase = "p-5 bg-slate-900/50 border border-slate-800/60 rounded-[2rem] backdrop-blur-xl mb-4";
+  const cardStyle = "p-5 bg-slate-900/80 border border-slate-800 rounded-[2rem] mb-4 backdrop-blur-md";
 
   return (
-    <div className="min-h-screen bg-[#020617] text-white p-4 font-sans select-none overflow-x-hidden">
+    <div className="min-h-screen bg-[#020617] text-white p-4 font-mono select-none">
       
-      [span_8](start_span){/* SECTION 1: PRICE & EXECUTION[span_8](end_span) */}
-      <div className={cardBase}>
-        <div className="flex justify-between items-start mb-1">
-          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Execution</span>
-          <div className="flex gap-4">
-            <div className="flex items-center gap-1 text-blue-500">
-              <Lucide.Triangle size={8} className="fill-current rotate-180" />
-              <span className="text-[10px] font-black tabular-nums">{metrics.ticks.up}</span>
-            </div>
-            <div className="flex items-center gap-1 text-red-500">
-              <Lucide.Triangle size={8} className="fill-current" />
-              <span className="text-[10px] font-black tabular-nums">{metrics.ticks.down}</span>
-            </div>
-          </div>
-        </div>
-        <div className={`text-5xl font-black tabular-nums tracking-tighter ${price >= prevPrice ? 'text-blue-500' : 'text-red-500'}`}>
-          {price ? price.toFixed(2) : "0.00"}
-        </div>
-      </div>
-
-      [span_9](start_span){/* SECTION 2: SMC VECTORS[span_9](end_span) */}
-      <div className={cardBase}>
-        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-3">SMC Vectors</span>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-black/40 p-2 rounded-xl border border-white/5">
-            <span className="text-[7px] font-black text-blue-400 block uppercase">Bull OB</span>
-            <span className="text-sm font-black tabular-nums">{vectors.bullOB.toFixed(2)}</span>
-          </div>
-          <div className="bg-black/40 p-2 rounded-xl border border-white/5">
-            <span className="text-[7px] font-black text-red-400 block uppercase">Bear OB</span>
-            <span className="text-sm font-black tabular-nums">{vectors.bearOB.toFixed(2)}</span>
-          </div>
-        </div>
-      </div>
-
-      [span_10](start_span){/* SECTION 3: STEALTH FLOW (ABSORPTION)[span_10](end_span) */}
-      <div className={cardBase}>
+      {/* SECTION 1: EXECUTION (TICKS) */}
+      <div className={cardStyle}>
         <div className="flex justify-between items-center mb-2">
-          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Stealth Flow</span>
-          <div className="text-[9px] font-black"><span className="text-blue-500">{metrics.stealth.buy}</span> / <span className="text-red-500">{metrics.stealth.sell}</span></div>
+          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">Execution Ticks</span>
+          <div className="flex gap-4">
+            <div className="flex items-center text-blue-500">
+              <Lucide.Triangle size={12} className="fill-current rotate-180 mr-1" />
+              <span className="text-sm font-black">{data.up}</span>
+            </div>
+            <div className="flex items-center text-red-500">
+              <Lucide.Triangle size={12} className="fill-current mr-1" />
+              <span className="text-sm font-black">{data.down}</span>
+            </div>
+          </div>
         </div>
-        <div className="h-3 bg-red-900/30 rounded-full overflow-hidden border border-white/5 relative">
-          <div className="h-full bg-blue-600 transition-all duration-700" 
-               style={{ width: `${(metrics.stealth.buy / (metrics.stealth.buy + metrics.stealth.sell || 1)) * 100}%` }}></div>
+        <div className="text-5xl font-black tracking-tighter text-blue-400">
+          ${price.toFixed(2)}
         </div>
       </div>
 
-      [span_11](start_span){/* SECTION 4: SIGMA BIDIRECTIONAL[span_11](end_span) */}
-      <div className={cardBase}>
-        <div className="flex justify-between items-center mb-3">
-           <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Sigma & Premium</span>
-           <span className="text-[10px] font-black text-blue-400">{metrics.riskPremium.toFixed(4)}</span>
+      {/* SECTION 2: STEALTH FLOW (BUY/SELL BAR) */}
+      <div className={cardStyle}>
+        <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-2 uppercase">
+          <span>Stealth Buy: {data.sBuy}</span>
+          <span>Stealth Sell: {data.sSell}</span>
         </div>
-        <div className="relative h-2.5 bg-black/60 rounded-full overflow-hidden border border-white/5">
-          <div className="absolute left-1/2 w-0.5 h-full bg-white/40 z-10"></div>
-          <div className={`absolute h-full transition-all duration-500 ${metrics.zScore > 0 ? 'bg-blue-500' : 'bg-red-500'}`}
+        <div className="h-3 bg-red-900/20 rounded-full overflow-hidden flex border border-white/5">
+          <div className="h-full bg-blue-600 transition-all duration-500" 
+               style={{ width: `${(data.sBuy / (data.sBuy + data.sSell || 1)) * 100}%` }} />
+        </div>
+      </div>
+
+      {/* SECTION 3: SIGMA BAR (BIDIRECTIONAL) */}
+      <div className={cardStyle}>
+        <span className="text-[10px] text-slate-500 font-bold uppercase block mb-3">Sigma Variance (±3σ)</span>
+        <div className="relative h-2.5 bg-black/40 rounded-full border border-white/5 overflow-hidden">
+          <div className="absolute left-1/2 w-0.5 h-full bg-white/30 z-10" />
+          <div className={`absolute h-full transition-all duration-300 ${data.sigma > 0 ? 'bg-emerald-400' : 'bg-rose-500'}`}
                style={{ 
-                 width: `${Math.min(50, Math.abs(metrics.zScore) * 15)}%`, 
-                 left: metrics.zScore > 0 ? '50%' : 'auto', 
-                 right: metrics.zScore < 0 ? '50%' : 'auto' 
+                 width: `${Math.min(50, Math.abs(data.sigma) * 15)}%`, 
+                 left: data.sigma > 0 ? '50%' : 'auto', 
+                 right: data.sigma < 0 ? '50%' : 'auto' 
                }} />
         </div>
       </div>
 
-      [span_12](start_span){/* SECTION 5: FLUX WAVE VISUALS (RSI)[span_12](end_span) */}
-      <div className={cardBase}>
+      {/* SECTION 4: RSI FLUX & WAVES */}
+      <div className={cardStyle}>
         <div className="flex justify-between items-center mb-2">
-          <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest">Flux Wave</span>
-          <span className="text-lg font-black italic tabular-nums">{rsi.toFixed(0)}</span>
+          <span className="text-[10px] text-blue-500 font-bold uppercase">Flux Momentum Wave</span>
+          <span className="text-xl font-black italic">{data.rsi.toFixed(0)}</span>
         </div>
-        <div className="h-12 flex items-end gap-[1.5px] bg-black/40 rounded-xl px-2 py-1 border border-white/5 overflow-hidden">
+        <div className="h-14 flex items-end gap-1 px-1">
           {history.map((v, i) => (
-            <div key={i} className={`flex-1 rounded-t-sm transition-all duration-500 ${v > 70 ? 'bg-blue-500' : v < 30 ? 'bg-red-500' : 'bg-slate-700'}`} 
-                 style={{ height: `${Math.max(10, v)}%`, opacity: 0.3 + (i / 45) }} />
+            <div key={i} className="flex-1 bg-blue-500/40 rounded-t-sm transition-all"
+                 style={{ height: `${Math.min(100, v)}%`, opacity: 0.2 + (i / 40) }} />
           ))}
         </div>
-      </div>
-
-      [span_13](start_span){/* REGIME FOOTER[span_13](end_span) */}
-      <div className="p-4 bg-blue-600/10 border border-blue-500/20 rounded-[1.5rem] text-center backdrop-blur-md">
-        <div className="text-[8px] font-black text-blue-500/50 uppercase tracking-[0.3em] mb-1">Market Regime</div>
-        <div className="text-[11px] font-black tracking-widest text-white uppercase">{regime}</div>
       </div>
 
     </div>
