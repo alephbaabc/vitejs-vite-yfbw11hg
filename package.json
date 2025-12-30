@@ -41,6 +41,7 @@
 >>>>>>> parent of c71b30d (Revert "Update package.json")
     "react": "^18.2.3",
     "react-dom": "^18.2.3",
+<<<<<<< HEAD
     "lucide-react": "^0.292.0",
     "recharts": "^2.9.1"
 <<<<<<< HEAD
@@ -90,6 +91,9 @@
 >>>>>>> parent of 2d5e7af (Update package.json)
 =======
 >>>>>>> parent of c71b30d (Revert "Update package.json")
+=======
+    "lucide-react": "^0.292.0"
+>>>>>>> parent of f42fcb8 (Update package.json)
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
