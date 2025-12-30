@@ -11,11 +11,14 @@
   },
   "dependencies": {
 <<<<<<< HEAD
+<<<<<<< HEAD
     "react": "^18.2.3",
     "react-dom": "^18.2.3",
     "lucide-react": "^0.292.0",
     "recharts": "^2.9.1"
 =======
+=======
+>>>>>>> parent of 2149d8f (Update package.json)
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "lucide-react": "^0.292.0"
