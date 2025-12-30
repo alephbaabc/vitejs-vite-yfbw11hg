@@ -15,12 +15,16 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> parent of 2d5e7af (Update package.json)
 =======
 >>>>>>> parent of 2d5e7af (Update package.json)
     "react": "^18.2.3",
     "react-dom": "^18.2.3",
     "lucide-react": "^0.292.0",
     "recharts": "^2.9.1"
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
 =======
@@ -33,6 +37,8 @@
     "react-dom": "^19.2.3",
     "lucide-react": "^0.292.0"
 >>>>>>> parent of 2149d8f (Update package.json)
+=======
+>>>>>>> parent of 2d5e7af (Update package.json)
 =======
 >>>>>>> parent of 2d5e7af (Update package.json)
   },
