@@ -13,6 +13,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> parent of 2d5e7af (Update package.json)
     "react": "^18.2.3",
@@ -21,6 +22,8 @@
     "recharts": "^2.9.1"
 <<<<<<< HEAD
 =======
+=======
+>>>>>>> parent of 2149d8f (Update package.json)
 =======
 >>>>>>> parent of 2149d8f (Update package.json)
     "react": "^19.2.3",
